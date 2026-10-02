@@ -1,5 +1,77 @@
-import { ObstacleConfig, PVArrayConfig, SolarPosition, ModuleShadingState, HourlySimPoint, DailySimulationResult, IrradianceData } from '../types/solar';
-import { DEG2RAD, calculateSolarPosition, calculateIrradiance } from './solarMath';
+import {
+  ObstacleConfig,
+  PVArrayConfig,
+  SolarPosition,
+  ModuleShadingState,
+  HourlySimPoint,
+  DailySimulationResult,
+  LocationConfig,
+  SkyConfig,
+} from '../types/solar';
+import { DEG2RAD, calculateSolarPosition, calculateIrradiance, getDayOfYear } from './solarMath';
+import { acPowerKW } from './pvModel';
+
+type Vec3 = [number, number, number];
+
+/** Sun unit vector (X = East, Y = Up, Z = North). */
+function sunVector(sunAltDeg: number, sunAzDeg: number): Vec3 {
+  const alpha = sunAltDeg * DEG2RAD;
+  const psi = sunAzDeg * DEG2RAD;
+  return [Math.sin(psi) * Math.cos(alpha), Math.sin(alpha), Math.cos(psi) * Math.cos(alpha)];
+}
+
+/**
+ * Array frame → world. Local axes: u along the row (width), s up the slope (−L/2 … +L/2).
+ * The panel faces `azimuth` (0 = N), so the LOW edge points toward the facing direction and the
+ * HIGH edge points away from it (rotation by azimuth + 180°). The 3D viewport uses the same
+ * convention (rotation order YXZ).
+ */
+export function arrayLocalToWorld(u: number, s: number, cfg: PVArrayConfig, offset: Vec3 = [0, 0, 0]): Vec3 {
+  const tiltRad = cfg.tilt * DEG2RAD;
+  const phi = (cfg.azimuth + 180) * DEG2RAD;
+  const lx = u;
+  const ly = cfg.mountHeight + s * Math.sin(tiltRad);
+  const lz = s * Math.cos(tiltRad);
+  return [
+    lx * Math.cos(phi) + lz * Math.sin(phi) + offset[0],
+    ly + offset[1],
+    -lx * Math.sin(phi) + lz * Math.cos(phi) + offset[2],
+  ];
+}
+
+/** Horizontal offset of the identical row in front (toward the facing direction). */
+export function frontRowOffset(cfg: PVArrayConfig): Vec3 {
+  const az = cfg.azimuth * DEG2RAD;
+  return [Math.sin(az) * cfg.rowSpacing, 0, Math.cos(az) * cfg.rowSpacing];
+}
+
+/** Tree geometry: trunk + ellipsoidal crown whose TOP is exactly at baseElevation + height. */
+export function getTreeGeometry(obs: ObstacleConfig) {
+  const rh = Math.max(0.25, obs.width / 2); // horizontal crown radius
+  const rv = Math.max(0.2, Math.min(rh, obs.height * 0.35)); // vertical crown radius
+  const crownCenterY = obs.height - rv; // relative to base
+  return { rh, rv, crownCenterY, trunkTopY: crownCenterY, trunkRadius: 0.25 };
+}
+
+/** Ray (P + t·D, t > 0) vs. the tilted rectangle of the PV row in front. */
+function isPointShadedByFrontRow(p: Vec3, sun: Vec3, cfg: PVArrayConfig): boolean {
+  if (!cfg.frontRowEnabled || cfg.rowSpacing <= 0) return false;
+  const off = frontRowOffset(cfg);
+  const c = arrayLocalToWorld(0, 0, cfg, off);
+  const eu = arrayLocalToWorld(1, 0, cfg, off).map((v, i) => v - c[i]) as Vec3;
+  const es = arrayLocalToWorld(0, 1, cfg, off).map((v, i) => v - c[i]) as Vec3;
+  const n: Vec3 = [eu[1] * es[2] - eu[2] * es[1], eu[2] * es[0] - eu[0] * es[2], eu[0] * es[1] - eu[1] * es[0]];
+  const denom = n[0] * sun[0] + n[1] * sun[1] + n[2] * sun[2];
+  if (Math.abs(denom) < 1e-6) return false;
+  const t = (n[0] * (c[0] - p[0]) + n[1] * (c[1] - p[1]) + n[2] * (c[2] - p[2])) / denom;
+  if (t <= 1e-4) return false;
+  const q: Vec3 = [p[0] + t * sun[0] - c[0], p[1] + t * sun[1] - c[1], p[2] + t * sun[2] - c[2]];
+  const u = q[0] * eu[0] + q[1] * eu[1] + q[2] * eu[2];
+  const s = q[0] * es[0] + q[1] * es[1] + q[2] * es[2];
+  const halfW = (cfg.moduleCountX * cfg.moduleWidth) / 2;
+  const halfL = (cfg.moduleCountY * cfg.moduleLength) / 2;
+  return Math.abs(u) <= halfW && Math.abs(s) <= halfL;
+}
 
 /**
  * Checks if a 3D ray from point P towards the Sun vector hits an obstacle
@@ -14,15 +86,7 @@ export function isPointShadedByObstacle(
 ): boolean {
   if (!obstacle.enabled || sunAltDeg <= 0.5) return false;
 
-  const alpha = sunAltDeg * DEG2RAD;
-  const psi = sunAzDeg * DEG2RAD;
-
-  // Sun unit vector (X = East, Y = Up, Z = North)
-  // Azimuth: 0=N (+Z), 90=E (+X), 180=S (-Z), 270=W (-X)
-  const sunX = Math.sin(psi) * Math.cos(alpha);
-  const sunY = Math.sin(alpha);
-  const sunZ = Math.cos(psi) * Math.cos(alpha);
-
+  const [sunX, sunY, sunZ] = sunVector(sunAltDeg, sunAzDeg);
   if (sunY <= 0.01) return false; // Below or at horizon
 
   // Obstacle position relative to array center (0,0)
@@ -32,72 +96,60 @@ export function isPointShadedByObstacle(
   const baseElev = obstacle.baseElevation || 0;
   const topY = baseElev + obstacle.height;
 
-  // Intersect ray P + t * Sun with obstacle geometry
   if (obstacle.type === 'tree') {
-    // Tree modeled as a foliage sphere on top of a trunk cylinder
-    const trunkHeight = obstacle.height * 0.45;
-    const crownRadius = obstacle.width / 2;
-    const crownCenterY = baseElev + trunkHeight + crownRadius;
-
-    // Check foliage sphere intersection
+    // Tree = vertical trunk + ellipsoidal crown (horizontal radius rh, vertical radius rv),
+    // crown top exactly at baseElevation + height.
+    const g = getTreeGeometry(obstacle);
+    const k = g.rh / g.rv; // scale Y so the ellipsoid becomes a sphere of radius rh
     const dx = px - obsCenterX;
-    const dy = py - crownCenterY;
+    const dy = (py - (baseElev + g.crownCenterY)) * k;
     const dz = pz - obsCenterZ;
-
-    const b = 2 * (dx * sunX + dy * sunY + dz * sunZ);
-    const c = dx * dx + dy * dy + dz * dz - crownRadius * crownRadius;
-    const discriminant = b * b - 4 * c;
-
-    if (discriminant >= 0) {
-      const t1 = (-b - Math.sqrt(discriminant)) / 2;
-      const t2 = (-b + Math.sqrt(discriminant)) / 2;
-      if (t2 > 0) return true; // hits tree crown towards sun
+    const ux = sunX, uy = sunY * k, uz = sunZ;
+    const A = ux * ux + uy * uy + uz * uz;
+    const B = 2 * (dx * ux + dy * uy + dz * uz);
+    const C = dx * dx + dy * dy + dz * dz - g.rh * g.rh;
+    const disc = B * B - 4 * A * C;
+    if (disc >= 0) {
+      const t2 = (-B + Math.sqrt(disc)) / (2 * A);
+      if (t2 > 0) return true;
     }
 
-    // Check trunk cylinder (radius ~0.25m)
-    const trunkRadius = 0.25;
-    const tToTrunk = (obsCenterZ - pz) / sunZ;
-    if (tToTrunk > 0) {
-      const hitX = px + tToTrunk * sunX;
-      const hitY = py + tToTrunk * sunY;
-      if (
-        Math.abs(hitX - obsCenterX) <= trunkRadius &&
-        hitY >= baseElev &&
-        hitY <= baseElev + trunkHeight
-      ) {
-        return true;
+    // Trunk: vertical cylinder — closest approach of the ray to the trunk axis (horizontal plane)
+    const hx = sunX, hz = sunZ;
+    const hh = hx * hx + hz * hz;
+    if (hh > 1e-9) {
+      const t = ((obsCenterX - px) * hx + (obsCenterZ - pz) * hz) / hh;
+      if (t > 0) {
+        const cx = px + t * sunX - obsCenterX;
+        const cz = pz + t * sunZ - obsCenterZ;
+        const cy = py + t * sunY;
+        if (Math.hypot(cx, cz) <= g.trunkRadius && cy >= baseElev && cy <= baseElev + g.trunkTopY) return true;
       }
     }
   } else if (obstacle.type === 'building' || obstacle.type === 'wall' || obstacle.type === 'front_row') {
-    // Box / Wall obstacle
+    // Box / wall obstacle, oriented so its WIDTH runs across the line of sight from the array
+    // (tangential) and its DEPTH runs along it (radial). Same orientation as the 3D viewport.
     const halfW = obstacle.width / 2;
-    const depth = obstacle.depth || (obstacle.type === 'wall' ? 0.3 : obstacle.type === 'front_row' ? 1.5 : 4);
+    const depth = obstacle.depth || (obstacle.type === 'wall' ? 0.3 : obstacle.type === 'front_row' ? 1.2 : 5);
     const halfD = depth / 2;
+    const tX = Math.cos(obsAzRad), tZ = -Math.sin(obsAzRad); // tangential axis
+    const rX = Math.sin(obsAzRad), rZ = Math.cos(obsAzRad); // radial axis
 
-    // Fast bounding box ray test
-    const minX = obsCenterX - halfW;
-    const maxX = obsCenterX + halfW;
-    const minZ = obsCenterZ - halfD;
-    const maxZ = obsCenterZ + halfD;
+    const dx = px - obsCenterX, dz = pz - obsCenterZ;
+    const pu = dx * tX + dz * tZ; // point, local tangential
+    const pv = dx * rX + dz * rZ; // point, local radial
+    const su = sunX * tX + sunZ * tZ;
+    const sv = sunX * rX + sunZ * rZ;
 
-    // Check if ray towards sun passes through box [minX..maxX, baseElev..topY, minZ..maxZ]
-    const tx1 = (minX - px) / (sunX || 0.0001);
-    const tx2 = (maxX - px) / (sunX || 0.0001);
-    const tminX = Math.min(tx1, tx2);
-    const tmaxX = Math.max(tx1, tx2);
-
+    const tu1 = (-halfW - pu) / (su || 1e-9);
+    const tu2 = (halfW - pu) / (su || 1e-9);
     const ty1 = (baseElev - py) / sunY;
     const ty2 = (topY - py) / sunY;
-    const tminY = Math.min(ty1, ty2);
-    const tmaxY = Math.max(ty1, ty2);
+    const tv1 = (-halfD - pv) / (sv || 1e-9);
+    const tv2 = (halfD - pv) / (sv || 1e-9);
 
-    const tz1 = (minZ - pz) / (sunZ || 0.0001);
-    const tz2 = (maxZ - pz) / (sunZ || 0.0001);
-    const tminZ = Math.min(tz1, tz2);
-    const tmaxZ = Math.max(tz1, tz2);
-
-    const tEnter = Math.max(tminX, tminY, tminZ);
-    const tExit = Math.min(tmaxX, tmaxY, tmaxZ);
+    const tEnter = Math.max(Math.min(tu1, tu2), Math.min(ty1, ty2), Math.min(tv1, tv2));
+    const tExit = Math.min(Math.max(tu1, tu2), Math.max(ty1, ty2), Math.max(tv1, tv2));
 
     if (tEnter <= tExit && tExit > 0) {
       return true;
@@ -105,12 +157,14 @@ export function isPointShadedByObstacle(
   } else if (obstacle.type === 'pole') {
     // Narrow vertical cylinder
     const poleRadius = obstacle.width ? obstacle.width / 2 : 0.15;
-    const t = (obsCenterZ - pz) / (sunZ || 0.0001);
-    if (t > 0) {
-      const hitX = px + t * sunX;
-      const hitY = py + t * sunY;
-      if (Math.abs(hitX - obsCenterX) <= poleRadius && hitY >= baseElev && hitY <= topY) {
-        return true;
+    const hh = sunX * sunX + sunZ * sunZ;
+    if (hh > 1e-9) {
+      const t = ((obsCenterX - px) * sunX + (obsCenterZ - pz) * sunZ) / hh;
+      if (t > 0) {
+        const cx = px + t * sunX - obsCenterX;
+        const cz = pz + t * sunZ - obsCenterZ;
+        const cy = py + t * sunY;
+        if (Math.hypot(cx, cz) <= poleRadius && cy >= baseElev && cy <= topY) return true;
       }
     }
   }
@@ -130,10 +184,11 @@ export function calculateArrayShading(
   totalShadedFraction: number; // 0 to 1
   mismatchFactor: number; // 0 to 1 (accounts for bypass diodes and string topology)
 } {
-  const { moduleCountX, moduleCountY, moduleLength, moduleWidth, tilt, azimuth, mountHeight } = arrayConfig;
+  const { moduleCountX, moduleCountY, moduleLength, moduleWidth } = arrayConfig;
   const totalModules = moduleCountX * moduleCountY;
+  const activeObstacles = obstacles.filter((o) => o.enabled);
 
-  if (!solarPos.isDaylight || obstacles.filter(o => o.enabled).length === 0) {
+  if (!solarPos.isDaylight || (activeObstacles.length === 0 && !arrayConfig.frontRowEnabled)) {
     const defaultModules: ModuleShadingState[] = [];
     for (let i = 0; i < totalModules; i++) {
       defaultModules.push({
@@ -145,17 +200,10 @@ export function calculateArrayShading(
         relativePower: 1.0,
       });
     }
-    return {
-      modules: defaultModules,
-      totalShadedFraction: 0,
-      mismatchFactor: 1.0,
-    };
+    return { modules: defaultModules, totalShadedFraction: 0, mismatchFactor: 1.0 };
   }
 
-  const tiltRad = tilt * DEG2RAD;
-  const azRad = azimuth * DEG2RAD;
-
-  // Array center is (0,0)
+  const sun = sunVector(solarPos.altitude, solarPos.azimuth);
   const totalW = moduleCountX * moduleWidth;
   const totalL = moduleCountY * moduleLength;
 
@@ -166,14 +214,9 @@ export function calculateArrayShading(
   for (let r = 0; r < moduleCountY; r++) {
     for (let c = 0; c < moduleCountX; c++) {
       const index = r * moduleCountX + c;
-
-      // Module local coordinates relative to array center (before tilt & azimuth)
-      // c goes from -totalW/2 to +totalW/2
       const localX = (c + 0.5) * moduleWidth - totalW / 2;
-      // r goes along slope from bottom to top
       const localYAlongSlope = (r + 0.5) * moduleLength - totalL / 2;
 
-      // Check 3 sub-strings across module width/length
       // A standard PV module has 3 bypass diode zones (sub-strings 1, 2, 3)
       const subStringShaded: [boolean, boolean, boolean] = [false, false, false];
       let moduleShadedPoints = 0;
@@ -183,30 +226,17 @@ export function calculateArrayShading(
         let subHasShade = false;
         for (let p = 0; p < pointsPerSub; p++) {
           totalSamplePoints++;
-          // Offset within module
           const subXOffset = ((s + 0.5) / 3 - 0.5) * moduleWidth;
           const subYOffset = ((p + 0.5) / pointsPerSub - 0.5) * moduleLength;
+          const pt = arrayLocalToWorld(localX + subXOffset, localYAlongSlope + subYOffset, arrayConfig);
 
-          const pxLocal = localX + subXOffset;
-          const pySlope = localYAlongSlope + subYOffset;
-
-          // Transform with tilt: panel tilted around horizontal axis
-          // y (height) = mountHeight + pySlope * sin(tilt)
-          // z (depth) = pySlope * cos(tilt)
-          const pxTilted = pxLocal;
-          const pyTilted = mountHeight + pySlope * Math.sin(tiltRad);
-          const pzTilted = pySlope * Math.cos(tiltRad);
-
-          // Rotate by array azimuth around Y axis
-          const pxWorld = pxTilted * Math.cos(azRad) + pzTilted * Math.sin(azRad);
-          const pyWorld = pyTilted;
-          const pzWorld = -pxTilted * Math.sin(azRad) + pzTilted * Math.cos(azRad);
-
-          let ptShaded = false;
-          for (const obs of obstacles) {
-            if (obs.enabled && isPointShadedByObstacle(pxWorld, pyWorld, pzWorld, solarPos.altitude, solarPos.azimuth, obs)) {
-              ptShaded = true;
-              break;
+          let ptShaded = isPointShadedByFrontRow(pt, sun, arrayConfig);
+          if (!ptShaded) {
+            for (const obs of activeObstacles) {
+              if (isPointShadedByObstacle(pt[0], pt[1], pt[2], solarPos.altitude, solarPos.azimuth, obs)) {
+                ptShaded = true;
+                break;
+              }
             }
           }
 
@@ -221,62 +251,30 @@ export function calculateArrayShading(
 
       const shadedRatio = moduleShadedPoints / (3 * pointsPerSub);
 
-      // Relative power calculation of this module considering bypass diodes:
-      // If 1 substring is shaded: bypass diode activates -> module delivers 2/3 voltage (approx 66% power)
-      // If 2 substrings shaded: 1/3 voltage (approx 33% power)
-      // If 3 substrings shaded: 0% direct power (only diffuse ~10%)
-      let relativePower = 1.0;
-      const activeSubstrings = subStringShaded.filter(s => !s).length;
-      if (activeSubstrings === 3) {
-        relativePower = 1.0;
-      } else if (activeSubstrings === 2) {
-        relativePower = 0.66;
-      } else if (activeSubstrings === 1) {
-        relativePower = 0.33;
-      } else {
-        relativePower = 0.08; // only diffuse irradiance
-      }
+      // Relative power of this module considering bypass diodes:
+      // 1 substring shaded → bypass diode conducts → ≈2/3 power; 2 → ≈1/3; 3 → diffuse only (~8 %)
+      const activeSubstrings = subStringShaded.filter((v) => !v).length;
+      const relativePower = activeSubstrings === 3 ? 1.0 : activeSubstrings === 2 ? 0.66 : activeSubstrings === 1 ? 0.33 : 0.08;
 
-      modules.push({
-        index,
-        row: r,
-        col: c,
-        shadedRatio,
-        subStringsShaded: subStringShaded,
-        relativePower,
-      });
+      modules.push({ index, row: r, col: c, shadedRatio, subStringsShaded: subStringShaded, relativePower });
     }
   }
 
   const totalShadedFraction = totalSamplePoints > 0 ? shadedSamplePoints / totalSamplePoints : 0;
 
-  // Electrical Mismatch factor based on inverter topology:
+  // Electrical mismatch factor based on inverter topology
+  const sumRel = modules.reduce((acc, m) => acc + m.relativePower, 0);
+  const avgRel = sumRel / totalModules;
   let mismatchFactor = 1.0;
   if (arrayConfig.inverterType === 'microinverter') {
-    // Microinverter: each module has individual MPPT, power is simple sum
-    const sumRel = modules.reduce((acc, m) => acc + m.relativePower, 0);
-    mismatchFactor = sumRel / totalModules;
+    mismatchFactor = avgRel; // independent MPPT per module
   } else if (arrayConfig.inverterType === 'optimizer') {
-    // DC Optimizer: series string current is matched by buck/boost per module
-    // 98% efficiency with almost independent module output
-    const sumRel = modules.reduce((acc, m) => acc + m.relativePower, 0);
-    mismatchFactor = (sumRel / totalModules) * 0.98;
-  } else {
-    // Traditional String Inverter:
-    // When one or more modules are shaded, the string's operating current is constrained.
-    // If bypass diodes conduct, current is maintained but voltage drops by the bypassed diodes.
-    // However, if shading is uneven across rows, string MPPT incurs curve mismatch loss.
-    const sumRel = modules.reduce((acc, m) => acc + m.relativePower, 0);
-    const avgRel = sumRel / totalModules;
-    const worstModule = Math.min(...modules.map(m => m.relativePower));
-
-    if (totalShadedFraction === 0) {
-      mismatchFactor = 1.0;
-    } else {
-      // String inverter penalty: ~15-25% extra mismatch loss when partial shade occurs
-      const penalty = worstModule < 0.5 ? 0.85 : 0.93;
-      mismatchFactor = Math.max(0.05, avgRel * penalty);
-    }
+    mismatchFactor = avgRel; // module-level MPPT (DC/DC): shaded modules no longer drag down the string
+  } else if (totalShadedFraction > 0) {
+    // String inverter: extra mismatch / multi-peak MPPT penalty under partial shade
+    const worstModule = Math.min(...modules.map((m) => m.relativePower));
+    const penalty = worstModule < 0.5 ? 0.85 : 0.93;
+    mismatchFactor = Math.max(0.05, avgRel * penalty);
   }
 
   return {
@@ -287,67 +285,62 @@ export function calculateArrayShading(
 }
 
 /**
- * Runs a complete 24-hour simulation (sampled every 30-60 mins during daylight)
+ * Runs a full-day simulation for the 15th of `month`, LOCAL CLOCK TIME 05:00–19:00 every 30 minutes.
  */
 export function simulateFullDay(
-  latitude: number,
+  location: LocationConfig,
   month: number, // 1 to 12
   arrayConfig: PVArrayConfig,
-  obstacles: ObstacleConfig[]
+  obstacles: ObstacleConfig[],
+  sky: SkyConfig
 ): DailySimulationResult {
-  const daysInMonths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  let doy = 0;
-  for (let i = 0; i < month - 1; i++) doy += daysInMonths[i];
-  doy += 15; // mid of month
-
+  const doy = getDayOfYear(month, 15);
   const totalKWp = (arrayConfig.moduleCountX * arrayConfig.moduleCountY * arrayConfig.moduleWattage) / 1000;
-  const inverterEfficiency = 0.96; // 96% standard European / CEC inverter efficiency
-  const tempDerating = 0.90; // Tropical ambient temperature derating (~45°C cell temp = -0.38%/°C)
 
   const hourlyPoints: HourlySimPoint[] = [];
   let totalEnergyKWh = 0;
   let unshadedEnergyKWh = 0;
   let peakPowerKW = 0;
+  let peakHour = 12;
+  let poaDaily = 0; // Wh/m²
+  let ghiDaily = 0; // Wh/m²
+  const dt = 0.5;
 
-  // Evaluate hourly from 6:00 to 18:00
-  for (let h = 6; h <= 18; h += 0.5) {
-    const solarPos = calculateSolarPosition(latitude, doy, h);
-    const irradiance = calculateIrradiance(solarPos, arrayConfig.tilt, arrayConfig.azimuth);
+  for (let h = 5; h <= 19; h += dt) {
+    const solarPos = calculateSolarPosition(location.latitude, doy, h, location.longitude, location.timezoneOffset);
+    const irradiance = calculateIrradiance(solarPos, arrayConfig.tilt, arrayConfig.azimuth, {
+      sky,
+      latitude: location.latitude,
+      dayOfYear: doy,
+    });
+    const solarHour = solarPos.solarTime ?? h;
 
     if (!solarPos.isDaylight || irradiance.poaTotalUnshaded <= 1) {
       hourlyPoints.push({
-        hour: h,
-        solarPos,
-        irradiance,
-        shadingLossPercent: 0,
-        effectivePOA: 0,
-        dcPowerKW: 0,
-        acPowerKW: 0,
-        unshadedACPowerKW: 0,
+        hour: h, solarPos, irradiance, shadingLossPercent: 0, effectivePOA: 0,
+        dcPowerKW: 0, acPowerKW: 0, unshadedACPowerKW: 0,
       });
       continue;
     }
 
     const shadingResult = calculateArrayShading(arrayConfig, obstacles, solarPos);
+    const ideal = acPowerKW(totalKWp, irradiance.poaTotalUnshaded, solarHour, arrayConfig.tilt, 1);
+    const actual = acPowerKW(totalKWp, irradiance.poaTotalUnshaded, solarHour, arrayConfig.tilt, shadingResult.mismatchFactor);
 
-    // Unshaded power: standard STC (1000 W/m²) scaling
-    const unshadedDCPowerKW = totalKWp * (irradiance.poaTotalUnshaded / 1000) * tempDerating;
-    const unshadedACPowerKW = unshadedDCPowerKW * inverterEfficiency;
-
-    // Shaded power: effective POA accounts for direct beam blockage + electrical mismatch factor
-    const effectivePOA = irradiance.poaTotalUnshaded * (1 - shadingResult.totalShadedFraction * (irradiance.poaBeam / Math.max(1, irradiance.poaTotalUnshaded)));
-    const dcPowerKW = totalKWp * (irradiance.poaTotalUnshaded / 1000) * tempDerating * shadingResult.mismatchFactor;
-    const acPowerKW = dcPowerKW * inverterEfficiency;
-
-    const shadingLossPercent = unshadedACPowerKW > 0.01
-      ? Math.max(0, Math.min(100, ((unshadedACPowerKW - acPowerKW) / unshadedACPowerKW) * 100))
+    const effectivePOA = irradiance.poaTotalUnshaded * shadingResult.mismatchFactor;
+    const shadingLossPercent = ideal.acKW > 0.01
+      ? Math.max(0, Math.min(100, ((ideal.acKW - actual.acKW) / ideal.acKW) * 100))
       : 0;
 
-    peakPowerKW = Math.max(peakPowerKW, acPowerKW);
+    if (actual.acKW > peakPowerKW) {
+      peakPowerKW = actual.acKW;
+      peakHour = h;
+    }
 
-    // Energy integration: dt = 0.5 hours
-    totalEnergyKWh += acPowerKW * 0.5;
-    unshadedEnergyKWh += unshadedACPowerKW * 0.5;
+    totalEnergyKWh += actual.acKW * dt;
+    unshadedEnergyKWh += ideal.acKW * dt;
+    poaDaily += irradiance.poaTotalUnshaded * dt;
+    ghiDaily += irradiance.ghi * dt;
 
     hourlyPoints.push({
       hour: h,
@@ -355,9 +348,10 @@ export function simulateFullDay(
       irradiance,
       shadingLossPercent: Math.round(shadingLossPercent * 10) / 10,
       effectivePOA: Math.round(effectivePOA),
-      dcPowerKW: Math.round(dcPowerKW * 100) / 100,
-      acPowerKW: Math.round(acPowerKW * 100) / 100,
-      unshadedACPowerKW: Math.round(unshadedACPowerKW * 100) / 100,
+      dcPowerKW: Math.round(actual.dcKW * 100) / 100,
+      acPowerKW: Math.round(actual.acKW * 100) / 100,
+      unshadedACPowerKW: Math.round(ideal.acKW * 100) / 100,
+      cellTempC: Math.round(actual.cellTemp * 10) / 10,
     });
   }
 
@@ -365,9 +359,11 @@ export function simulateFullDay(
   const overallLoss = unshadedEnergyKWh > 0 ? (energyLostKWh / unshadedEnergyKWh) * 100 : 0;
   const specificYield = totalKWp > 0 ? totalEnergyKWh / totalKWp : 0;
 
-  // Performance Ratio (PR): Actual yield / Reference yield
-  const referenceYield = unshadedEnergyKWh / Math.max(0.1, totalKWp);
-  const performanceRatio = referenceYield > 0 ? Math.min(0.95, (specificYield / referenceYield) * 0.82) : 0.80;
+  // IEC 61724 Performance Ratio: final yield / reference yield
+  const poaKWhm2 = poaDaily / 1000;
+  const referenceYield = poaKWhm2; // kWh/kWp = H_POA / 1 kW/m²
+  const performanceRatio = referenceYield > 0 ? specificYield / referenceYield : 0;
+  const unshadedPR = referenceYield > 0 && totalKWp > 0 ? unshadedEnergyKWh / totalKWp / referenceYield : 0;
 
   return {
     hourly: hourlyPoints,
@@ -378,7 +374,37 @@ export function simulateFullDay(
     peakPowerKW: Math.round(peakPowerKW * 100) / 100,
     systemCapacityKWp: totalKWp,
     specificYieldKWhPerKWp: Math.round(specificYield * 100) / 100,
-    performanceRatio: Math.round(performanceRatio * 100) / 100,
+    performanceRatio: Math.round(performanceRatio * 1000) / 1000,
+    unshadedPerformanceRatio: Math.round(unshadedPR * 1000) / 1000,
+    ghiDailyKWhm2: Math.round(ghiDaily / 10) / 100,
+    poaDailyKWhm2: Math.round(poaKWhm2 * 100) / 100,
+    peakHour,
+  };
+}
+
+/** Annual totals: 12 mid-month days × days in month. */
+export function simulateYear(
+  location: LocationConfig,
+  arrayConfig: PVArrayConfig,
+  obstacles: ObstacleConfig[],
+  sky: SkyConfig
+): { annualKWh: number; annualUnshadedKWh: number; annualLostKWh: number; annualLossPercent: number; monthlyKWh: number[] } {
+  const days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  let a = 0;
+  let u = 0;
+  const monthlyKWh: number[] = [];
+  for (let m = 1; m <= 12; m++) {
+    const d = simulateFullDay(location, m, arrayConfig, obstacles, sky);
+    monthlyKWh.push(d.totalEnergyKWh * days[m - 1]);
+    a += d.totalEnergyKWh * days[m - 1];
+    u += d.unshadedEnergyKWh * days[m - 1];
+  }
+  return {
+    annualKWh: Math.round(a),
+    annualUnshadedKWh: Math.round(u),
+    annualLostKWh: Math.round(u - a),
+    annualLossPercent: u > 0 ? Math.round(((u - a) / u) * 1000) / 10 : 0,
+    monthlyKWh,
   };
 }
 

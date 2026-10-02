@@ -12,10 +12,16 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
   arrayConfig,
   onApplyRowSpacing,
 }) => {
-  const [moduleLength, setModuleLength] = useState<number>(arrayConfig.moduleLength || 2.27);
-  const [tilt, setTilt] = useState<number>(arrayConfig.tilt || 15);
+  // L = length of the whole table along the slope (modules per row-depth × module length)
+  const [moduleLength, setModuleLength] = useState<number>(
+    Math.round(arrayConfig.moduleCountY * arrayConfig.moduleLength * 100) / 100 || 2.27
+  );
+  const [tilt, setTilt] = useState<number>(arrayConfig.tilt ?? 15);
   const [criticalSunAlt, setCriticalSunAlt] = useState<number>(25); // degrees
-  const [actualPitch, setActualPitch] = useState<number>(3.0); // meters
+  const [pitchState, setActualPitch] = useState<number>(arrayConfig.rowSpacing || 3.0); // meters
+  // Rows cannot overlap: pitch must exceed the horizontal projection of the table
+  const minPhysicalPitch = Math.ceil((moduleLength * Math.cos((tilt * Math.PI) / 180) + 0.05) * 20) / 20;
+  const actualPitch = Math.max(pitchState, minPhysicalPitch);
 
   const result = calculateInterRowPitch(moduleLength, tilt, criticalSunAlt);
   const isShading = actualPitch < result.minRowPitch;
@@ -23,7 +29,13 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
   // SVG parameters for 2D schematic
   const svgWidth = 620;
   const svgHeight = 220;
-  const scale = 50; // pixels per meter
+  // pixels per meter — shrink automatically so long tables / wide pitches stay inside the drawing
+  const drawLengthM =
+    Math.max(actualPitch, 0) +
+    moduleLength * Math.cos((tilt * Math.PI) / 180) +
+    Math.max(0, result.shadowLength - Math.max(0, actualPitch - moduleLength * Math.cos((tilt * Math.PI) / 180))) +
+    0.5;
+  const scale = Math.min(50, 520 / Math.max(1, drawLengthM), 140 / Math.max(0.3, moduleLength * Math.sin((tilt * Math.PI) / 180)));
   const groundY = 170;
   const row1StartX = 70;
 
@@ -178,8 +190,8 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
           </div>
           <input
             type="range"
-            min="1.0"
-            max="6.0"
+            min={minPhysicalPitch}
+            max="15.0"
             step="0.05"
             value={actualPitch}
             onChange={(e) => setActualPitch(parseFloat(e.target.value))}
@@ -197,12 +209,20 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
               Gunakan Nilai Minimum
             </button>
           </div>
+          <div className="flex justify-end">
+            <button
+              onClick={() => onApplyRowSpacing(actualPitch)}
+              className="px-2.5 py-1 rounded-lg bg-amber-500 text-white font-semibold text-[11px] hover:bg-amber-600"
+            >
+              Terapkan Pitch {actualPitch.toFixed(2)} m ke Simulasi 3D
+            </button>
+          </div>
         </div>
 
         {/* Sudut Kemiringan Modul */}
         <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
           <div className="flex justify-between items-center">
-            <span className="font-semibold text-slate-800">Sudut Kemiringan ($\beta$):</span>
+            <span className="font-semibold text-slate-800">Sudut Kemiringan (β):</span>
             <span className="font-mono text-base font-bold text-amber-700">{tilt}°</span>
           </div>
           <input
@@ -223,7 +243,7 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
         <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
           <div className="flex justify-between items-center">
             <span className="font-semibold text-slate-800">
-              Batas Elevasi Matahari Kritis ($\alpha$):
+              Batas Elevasi Matahari Kritis (α):
             </span>
             <span className="font-mono text-base font-bold text-slate-800">{criticalSunAlt}°</span>
           </div>
@@ -244,20 +264,21 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
         {/* Dimensi Panjang Modul */}
         <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
           <div className="flex justify-between items-center">
-            <span className="font-semibold text-slate-800">Panjang Modul (L):</span>
+            <span className="font-semibold text-slate-800">Panjang Meja Searah Kemiringan (L):</span>
             <span className="font-mono text-base font-bold text-slate-800">{moduleLength.toFixed(2)} m</span>
           </div>
           <input
             type="range"
-            min="1.6"
-            max="2.5"
+            min="1.0"
+            max="10"
             step="0.05"
             value={moduleLength}
             onChange={(e) => setModuleLength(parseFloat(e.target.value))}
             className="w-full accent-amber-500 cursor-pointer"
           />
           <div className="text-[11px] text-slate-500">
-            Standar 550Wp bifacial ~2.27 m (potret) atau ~1.13 m (lanskap).
+            L = jumlah modul searah kemiringan × panjang modul. Satu modul 550 Wp ≈ 2,27 m (potret) atau ≈ 1,13 m (lanskap).
+            Nilai awal diambil dari konfigurasi array ({arrayConfig.moduleCountY} × {arrayConfig.moduleLength} m).
           </div>
         </div>
       </div>

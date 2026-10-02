@@ -109,11 +109,12 @@ export const MetricsCards: React.FC<MetricsCardsProps> = ({
             {(dailyResult.performanceRatio * 100).toFixed(1)}%
           </span>
         </div>
-        <div className="mt-1 text-[11px] text-slate-500">
-          <span>Kategori: </span>
-          <b className={`font-semibold ${dailyResult.performanceRatio >= 0.75 ? 'text-emerald-600' : dailyResult.performanceRatio >= 0.6 ? 'text-amber-600' : 'text-rose-600'}`}>
-            {dailyResult.performanceRatio >= 0.75 ? 'Optimal' : dailyResult.performanceRatio >= 0.6 ? 'Sedang' : 'Terdampak Parah'}
+        <div className="mt-1 text-[11px] text-slate-500" title="PR (IEC 61724) = (E_AC / P0) ÷ (H_POA / 1 kW/m²). Sudah mencakup rugi suhu, debu, kabel, inverter, dan bayangan.">
+          <b className={`font-semibold ${dailyResult.performanceRatio >= 0.8 ? 'text-emerald-600' : dailyResult.performanceRatio >= 0.7 ? 'text-amber-600' : 'text-rose-600'}`}>
+            {dailyResult.performanceRatio >= 0.8 ? 'Baik' : dailyResult.performanceRatio >= 0.7 ? 'Cukup' : 'Rendah'}
           </b>
+          <span className="mx-1">·</span>
+          <span>Tanpa bayangan: {(dailyResult.unshadedPerformanceRatio * 100).toFixed(1)}%</span>
         </div>
       </div>
     </div>

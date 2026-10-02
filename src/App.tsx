@@ -3,17 +3,22 @@ import {
   LocationConfig,
   PVArrayConfig,
   ObstacleConfig,
+  SkyConfig,
 } from './types/solar';
 import {
   CITIES_INDONESIA,
   calculateSolarPosition,
   calculateIrradiance,
   getDayOfYear,
+  DEFAULT_SKY,
+  timeZoneLabel,
 } from './utils/solarMath';
 import {
   calculateArrayShading,
   simulateFullDay,
+  simulateYear,
 } from './utils/shadingMath';
+import { acPowerKW } from './utils/pvModel';
 import { Header } from './components/Header';
 import { MetricsCards } from './components/MetricsCards';
 import { Solar3DViewport } from './components/Solar3DViewport';
@@ -34,6 +39,7 @@ export default function App() {
   const [month, setMonth] = useState<number>(7); // July (Solstis Utara)
   const [hour, setHour] = useState<number>(9.5); // 09:30 AM
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [sky, setSky] = useState<SkyConfig>(DEFAULT_SKY);
 
   // PV Array Configuration
   const [arrayConfig, setArrayConfig] = useState<PVArrayConfig>({
@@ -48,6 +54,7 @@ export default function App() {
     mountType: 'rooftop_sloped',
     inverterType: 'string',
     rowSpacing: 2.5,
+    frontRowEnabled: false,
   });
 
   // Nearby Obstacles
@@ -85,14 +92,14 @@ export default function App() {
 
   // Instantaneous Solar Position
   const solarPos = useMemo(
-    () => calculateSolarPosition(location.latitude, dayOfYear, hour),
-    [location.latitude, dayOfYear, hour]
+    () => calculateSolarPosition(location.latitude, dayOfYear, hour, location.longitude, location.timezoneOffset),
+    [location.latitude, location.longitude, location.timezoneOffset, dayOfYear, hour]
   );
 
   // Instantaneous Irradiance Data
   const irradiance = useMemo(
-    () => calculateIrradiance(solarPos, arrayConfig.tilt, arrayConfig.azimuth),
-    [solarPos, arrayConfig.tilt, arrayConfig.azimuth]
+    () => calculateIrradiance(solarPos, arrayConfig.tilt, arrayConfig.azimuth, { sky, latitude: location.latitude, dayOfYear }),
+    [solarPos, arrayConfig.tilt, arrayConfig.azimuth, sky, location.latitude, dayOfYear]
   );
 
   // Instantaneous Array Shading & Module States
@@ -103,15 +110,14 @@ export default function App() {
 
   // Instantaneous Power Calculations
   const totalKWp = (arrayConfig.moduleCountX * arrayConfig.moduleCountY * arrayConfig.moduleWattage) / 1000;
-  const inverterEfficiency = 0.96;
-  const tempDerating = 0.90;
+  const solarHour = solarPos.solarTime ?? hour;
 
   const currentUnshadedPowerKW = solarPos.isDaylight
-    ? totalKWp * (irradiance.poaTotalUnshaded / 1000) * tempDerating * inverterEfficiency
+    ? acPowerKW(totalKWp, irradiance.poaTotalUnshaded, solarHour, arrayConfig.tilt, 1).acKW
     : 0;
 
   const currentACPowerKW = solarPos.isDaylight
-    ? totalKWp * (irradiance.poaTotalUnshaded / 1000) * tempDerating * shadingResult.mismatchFactor * inverterEfficiency
+    ? acPowerKW(totalKWp, irradiance.poaTotalUnshaded, solarHour, arrayConfig.tilt, shadingResult.mismatchFactor).acKW
     : 0;
 
   const currentLossPercent = currentUnshadedPowerKW > 0.01
@@ -120,8 +126,14 @@ export default function App() {
 
   // Full Day Simulation Profile (Cached per config & month)
   const dailyResult = useMemo(
-    () => simulateFullDay(location.latitude, month, arrayConfig, obstacles),
-    [location.latitude, month, arrayConfig, obstacles]
+    () => simulateFullDay(location, month, arrayConfig, obstacles, sky),
+    [location, month, arrayConfig, obstacles, sky]
+  );
+
+  // Annual totals (12 representative days) — used by the technical report
+  const annualResult = useMemo(
+    () => (isReportOpen ? simulateYear(location, arrayConfig, obstacles, sky) : null),
+    [isReportOpen, location, arrayConfig, obstacles, sky]
   );
 
   // Sun Movement Animation Loop
@@ -131,7 +143,7 @@ export default function App() {
       timerRef.current = window.setInterval(() => {
         setHour((prev) => {
           const next = prev + 0.15;
-          if (next > 18.0) return 6.0; // loop back to 06:00
+          if (next > 19.0) return 5.0; // loop back to 05:00
           return parseFloat(next.toFixed(2));
         });
       }, 120);
@@ -163,7 +175,9 @@ export default function App() {
       mountType: 'rooftop_sloped',
       inverterType: 'string',
       rowSpacing: 2.5,
+      frontRowEnabled: false,
     });
+    setSky(DEFAULT_SKY);
     setObstacles([
       {
         id: 'tree_1',
@@ -236,6 +250,8 @@ export default function App() {
                     moduleStates={shadingResult.modules}
                     totalShadedFraction={shadingResult.totalShadedFraction}
                     latitude={location.latitude}
+                    longitude={location.longitude}
+                    timezoneOffset={location.timezoneOffset}
                     dayOfYear={dayOfYear}
                     hour={hour}
                   />
@@ -245,6 +261,7 @@ export default function App() {
                 <HourlyYieldChart
                   dailyResult={dailyResult}
                   currentHour={hour}
+                  tzLabel={timeZoneLabel(location.timezoneOffset)}
                   onSelectHour={(h) => setHour(h)}
                 />
               </div>
@@ -264,6 +281,8 @@ export default function App() {
                   setArrayConfig={setArrayConfig}
                   obstacles={obstacles}
                   setObstacles={setObstacles}
+                  sky={sky}
+                  setSky={setSky}
                 />
               </div>
             </div>
@@ -275,6 +294,7 @@ export default function App() {
           <TiltSensitivityChart
             location={location}
             arrayConfig={arrayConfig}
+            sky={sky}
             onApplyTilt={(t, az) => {
               setArrayConfig((prev) => ({ ...prev, tilt: t, azimuth: az }));
               setActiveTab('simulasi');
@@ -287,7 +307,7 @@ export default function App() {
           <InterRowCalculator
             arrayConfig={arrayConfig}
             onApplyRowSpacing={(spacing) => {
-              setArrayConfig((prev) => ({ ...prev, rowSpacing: spacing }));
+              setArrayConfig((prev) => ({ ...prev, rowSpacing: spacing, frontRowEnabled: true }));
               setActiveTab('simulasi');
             }}
           />
@@ -306,6 +326,8 @@ export default function App() {
         obstacles={obstacles}
         month={month}
         dailyResult={dailyResult}
+        annualResult={annualResult}
+        sky={sky}
       />
     </div>
   );

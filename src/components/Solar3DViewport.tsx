@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { PVArrayConfig, ObstacleConfig, SolarPosition, ModuleShadingState } from '../types/solar';
 import { DEG2RAD, calculateSolarPosition } from '../utils/solarMath';
+import { frontRowOffset, getTreeGeometry } from '../utils/shadingMath';
 import { Compass, Eye, Sun, Maximize2, ShieldAlert } from 'lucide-react';
 
 interface Solar3DViewportProps {
@@ -12,6 +13,8 @@ interface Solar3DViewportProps {
   moduleStates: ModuleShadingState[];
   totalShadedFraction: number;
   latitude: number;
+  longitude: number;
+  timezoneOffset: number;
   dayOfYear: number;
   hour: number;
 }
@@ -23,6 +26,8 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
   moduleStates,
   totalShadedFraction,
   latitude,
+  longitude,
+  timezoneOffset,
   dayOfYear,
   hour,
 }) => {
@@ -223,8 +228,8 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
 
     if (showSunArc) {
       const arcPoints: THREE.Vector3[] = [];
-      for (let h = 5.5; h <= 18.5; h += 0.25) {
-        const p = calculateSolarPosition(latitude, dayOfYear, h);
+      for (let h = 4.5; h <= 19.5; h += 0.25) {
+        const p = calculateSolarPosition(latitude, dayOfYear, h, longitude, timezoneOffset);
         if (p.altitude > -2) {
           const aR = p.altitude * DEG2RAD;
           const azR = p.azimuth * DEG2RAD;
@@ -247,7 +252,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         sunArcRef.current = arcLine;
       }
     }
-  }, [solarPos, latitude, dayOfYear, showSunArc]);
+  }, [solarPos, latitude, longitude, timezoneOffset, dayOfYear, showSunArc]);
 
   // Update PV Array Geometry (Tilt, Azimuth, Rack, Modules, Shading Colors)
   useEffect(() => {
@@ -270,13 +275,11 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     const tiltGroup = new THREE.Group();
     tiltGroup.position.set(0, mountHeight, 0);
 
-    // Apply Array Azimuth rotation (around Y axis)
-    // Three.js rotation: Y axis clockwise/counter-clockwise
-    // In our convention: 0=N, 90=E, 180=S, 270=W
-    tiltGroup.rotation.y = azimuth * DEG2RAD;
-
-    // Tilt rotation around local X axis
-    // When tilted, the upper edge rises
+    // Orientation: the panel FACES `azimuth` (0=N, 90=E, 180=S, 270=W), so its high edge points the
+    // opposite way → yaw by azimuth + 180°. Order 'YXZ' = tilt about the row axis first, then yaw
+    // (same convention as arrayLocalToWorld() in shadingMath).
+    tiltGroup.rotation.order = 'YXZ';
+    tiltGroup.rotation.y = (azimuth + 180) * DEG2RAD;
     tiltGroup.rotation.x = -tilt * DEG2RAD;
 
     // Build Aluminum mounting frame rails underneath
@@ -380,7 +383,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
       // Calculate world position of this hinge attachment
       const localVec = new THREE.Vector3(lx, 0, lz);
       localVec.applyAxisAngle(new THREE.Vector3(1, 0, 0), -tilt * DEG2RAD);
-      localVec.applyAxisAngle(new THREE.Vector3(0, 1, 0), azimuth * DEG2RAD);
+      localVec.applyAxisAngle(new THREE.Vector3(0, 1, 0), (azimuth + 180) * DEG2RAD);
       const topY = mountHeight + localVec.y;
       const legHeight = Math.max(0.1, topY);
 
@@ -392,6 +395,33 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     });
 
     group.add(tiltGroup);
+
+    // Identical PV row in front (multi-row / self-shading study)
+    if (arrayConfig.frontRowEnabled) {
+      const off = frontRowOffset(arrayConfig);
+      const frontGroup = new THREE.Group();
+      frontGroup.position.set(off[0], mountHeight, off[2]);
+      frontGroup.rotation.order = 'YXZ';
+      frontGroup.rotation.y = (azimuth + 180) * DEG2RAD;
+      frontGroup.rotation.x = -tilt * DEG2RAD;
+      const slabMat = new THREE.MeshStandardMaterial({ color: 0x1e3a5f, roughness: 0.35, metalness: 0.5, transparent: true, opacity: 0.9 });
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(totalW, 0.04, totalL), slabMat);
+      slab.castShadow = true;
+      slab.receiveShadow = true;
+      frontGroup.add(slab);
+      group.add(frontGroup);
+
+      legPointsLocal.forEach(([lx, lz]) => {
+        const v = new THREE.Vector3(lx, 0, lz);
+        v.applyAxisAngle(new THREE.Vector3(1, 0, 0), -tilt * DEG2RAD);
+        v.applyAxisAngle(new THREE.Vector3(0, 1, 0), (azimuth + 180) * DEG2RAD);
+        const legHeight = Math.max(0.1, mountHeight + v.y);
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(legRadius, legRadius, legHeight, 8), legMat);
+        leg.position.set(v.x + off[0], legHeight / 2, v.z + off[2]);
+        leg.castShadow = true;
+        group.add(leg);
+      });
+    }
   }, [arrayConfig, moduleStates]);
 
   // Update Obstacles in 3D Scene
@@ -415,6 +445,8 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
       const baseElev = obs.baseElevation || 0;
       const obsGroup = new THREE.Group();
       obsGroup.position.set(posX, baseElev, posZ);
+      // Width runs across the line of sight (tangential), depth along it — same as shadingMath
+      obsGroup.rotation.y = azRad;
 
       // If baseElevation > 0, render a concrete foundation pedestal down to ground (y = -baseElev)
       if (baseElev > 0.05) {
@@ -436,8 +468,9 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
       }
 
       if (obs.type === 'tree') {
-        // Tree: Trunk + Organic Foliage Spheres
-        const trunkH = obs.height * 0.45;
+        // Tree: trunk + ellipsoidal crown — identical geometry to the shading calculation
+        const tg = getTreeGeometry(obs);
+        const trunkH = Math.max(0.1, tg.trunkTopY);
         const trunkGeom = new THREE.CylinderGeometry(0.2, 0.28, trunkH, 8);
         const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
         const trunkMesh = new THREE.Mesh(trunkGeom, trunkMat);
@@ -446,25 +479,16 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         trunkMesh.receiveShadow = true;
         obsGroup.add(trunkMesh);
 
-        // Lush green foliage
         const foliageMat = new THREE.MeshStandardMaterial({
           color: 0x166534,
           roughness: 0.8,
         });
-        const crownR = obs.width / 2;
-
-        const crownGeom1 = new THREE.SphereGeometry(crownR, 16, 16);
-        const crown1 = new THREE.Mesh(crownGeom1, foliageMat);
-        crown1.position.y = trunkH + crownR * 0.8;
-        crown1.castShadow = true;
-        crown1.receiveShadow = true;
-        obsGroup.add(crown1);
-
-        const crownGeom2 = new THREE.SphereGeometry(crownR * 0.8, 12, 12);
-        const crown2 = new THREE.Mesh(crownGeom2, foliageMat);
-        crown2.position.set(crownR * 0.25, trunkH + crownR * 1.3, -crownR * 0.2);
-        crown2.castShadow = true;
-        obsGroup.add(crown2);
+        const crown = new THREE.Mesh(new THREE.SphereGeometry(tg.rh, 20, 16), foliageMat);
+        crown.scale.set(1, tg.rv / tg.rh, 1);
+        crown.position.y = tg.crownCenterY;
+        crown.castShadow = true;
+        crown.receiveShadow = true;
+        obsGroup.add(crown);
       } else if (obs.type === 'building') {
         // Modern rectangular building block
         const bWidth = obs.width;

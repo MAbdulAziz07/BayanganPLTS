@@ -31,7 +31,20 @@ export interface PVArrayConfig {
   mountHeight: number; // meters above ground
   mountType: 'rooftop_sloped' | 'rooftop_flat' | 'ground';
   inverterType: 'string' | 'optimizer' | 'microinverter';
-  rowSpacing: number; // meters (for multi-row ground or flat roof)
+  rowSpacing: number; // meters, row pitch (front edge to front edge) to the identical row in front
+  frontRowEnabled?: boolean; // simulate an identical PV row in front of this one at `rowSpacing`
+}
+
+/**
+ * Sky / climate model.
+ * - 'climate'  : average-sky model. Daily GHI = KT × extraterrestrial irradiation (H0),
+ *                split into beam/diffuse (Erbs daily correlation) and distributed hourly
+ *                (Collares-Pereira & Rabl / Liu & Jordan).
+ * - 'clearsky' : cloudless reference sky (upper bound, for comparison only).
+ */
+export interface SkyConfig {
+  mode: 'climate' | 'clearsky';
+  kt: number; // monthly-average daily clearness index (0.30 – 0.75), typical humid tropics ≈ 0.45–0.55
 }
 
 export interface SolarPosition {
@@ -41,6 +54,7 @@ export interface SolarPosition {
   hourAngle: number; // degrees
   zenith: number; // degrees
   isDaylight: boolean;
+  solarTime?: number; // apparent solar time (hours) corresponding to the requested clock time
 }
 
 export interface IrradianceData {
@@ -72,6 +86,7 @@ export interface HourlySimPoint {
   dcPowerKW: number; // kW
   acPowerKW: number; // kW after inverter/string mismatch
   unshadedACPowerKW: number; // kW without any shade
+  cellTempC?: number; // module cell temperature (°C)
 }
 
 export interface DailySimulationResult {
@@ -83,5 +98,9 @@ export interface DailySimulationResult {
   peakPowerKW: number;
   systemCapacityKWp: number;
   specificYieldKWhPerKWp: number;
-  performanceRatio: number;
+  performanceRatio: number; // IEC 61724: PR = (E_AC / P0) / (H_POA / G_STC), includes shading
+  unshadedPerformanceRatio: number; // same, without obstacles (temperature, soiling, wiring, inverter only)
+  ghiDailyKWhm2: number; // daily global horizontal irradiation (kWh/m²)
+  poaDailyKWhm2: number; // daily plane-of-array irradiation, unshaded (kWh/m²)
+  peakHour: number; // clock hour of peak AC power
 }

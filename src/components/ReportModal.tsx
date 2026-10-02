@@ -4,8 +4,17 @@ import {
   PVArrayConfig,
   ObstacleConfig,
   DailySimulationResult,
+  SkyConfig,
 } from '../types/solar';
 import { MONTH_NAMES_ID, getRecommendedTilt } from '../utils/solarMath';
+
+export interface AnnualSummary {
+  annualKWh: number;
+  annualUnshadedKWh: number;
+  annualLostKWh: number;
+  annualLossPercent: number;
+  monthlyKWh: number[];
+}
 import { X, Printer, FileText, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 interface ReportModalProps {
@@ -16,6 +25,8 @@ interface ReportModalProps {
   obstacles: ObstacleConfig[];
   month: number;
   dailyResult: DailySimulationResult;
+  annualResult: AnnualSummary | null;
+  sky: SkyConfig;
 }
 
 export const ReportModal: React.FC<ReportModalProps> = ({
@@ -26,6 +37,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   obstacles,
   month,
   dailyResult,
+  annualResult,
+  sky,
 }) => {
   if (!isOpen) return null;
 
@@ -34,9 +47,11 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
   // Financial calculations (Tarif Listrik PLN Golongan R-1/B-1: ~Rp 1.444,70 / kWh)
   const tarifPLN = 1445; // Rp / kWh
+  // Annual figures come from 12 simulated mid-month days (× days per month), not one day × 365
   const kerugianHarianRp = Math.round(dailyResult.energyLostKWh * tarifPLN);
-  const kerugianTahunanRp = Math.round(dailyResult.energyLostKWh * 365 * tarifPLN);
-  const potensiProduksiTahunanKWh = Math.round(dailyResult.totalEnergyKWh * 365);
+  const potensiProduksiTahunanKWh = annualResult ? annualResult.annualKWh : Math.round(dailyResult.totalEnergyKWh * 365);
+  const kerugianTahunanRp = Math.round((annualResult ? annualResult.annualLostKWh : dailyResult.energyLostKWh * 365) * tarifPLN);
+  const skyLabel = sky.mode === 'climate' ? `Iklim rata-rata (K_T = ${sky.kt.toFixed(2)})` : 'Langit cerah (batas atas teoretis)';
 
   const handlePrint = () => {
     window.print();
@@ -88,6 +103,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               </div>
               <div className="text-right text-[11px] text-slate-500 font-mono">
                 <div>Periode: Bulan {MONTH_NAMES_ID[month - 1]}</div>
+                <div>Model langit: {skyLabel}</div>
                 <div>Status: Selesai Disimulasikan</div>
               </div>
             </div>
@@ -160,12 +176,38 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                 </span>
               </div>
               <div>
-                <span className="text-[11px] text-slate-500 block">Performance Ratio (PR)</span>
+                <span className="text-[11px] text-slate-500 block">Performance Ratio (PR, IEC 61724)</span>
                 <span className="font-mono text-base font-bold text-indigo-700">
                   {(dailyResult.performanceRatio * 100).toFixed(1)}%
                 </span>
+                <span className="text-[10px] text-slate-500 block">Tanpa bayangan: {(dailyResult.unshadedPerformanceRatio * 100).toFixed(1)}%</span>
               </div>
             </div>
+            {annualResult && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 mt-2">
+                <div>
+                  <span className="text-[11px] text-slate-500 block">Produksi Tahunan</span>
+                  <span className="font-mono text-base font-bold text-sky-700">{annualResult.annualKWh.toLocaleString('id-ID')} kWh</span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 block">Yield Spesifik Tahunan</span>
+                  <span className="font-mono text-base font-bold text-slate-900">{totalKWp > 0 ? Math.round(annualResult.annualKWh / totalKWp).toLocaleString('id-ID') : 0} kWh/kWp</span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 block">Potensi Tahunan Tanpa Bayangan</span>
+                  <span className="font-mono text-base font-bold text-slate-900">{annualResult.annualUnshadedKWh.toLocaleString('id-ID')} kWh</span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 block">Rugi Bayangan Tahunan</span>
+                  <span className={`font-mono text-base font-bold ${annualResult.annualLossPercent > 5 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    {annualResult.annualLossPercent}% ({annualResult.annualLostKWh.toLocaleString('id-ID')} kWh)
+                  </span>
+                </div>
+              </div>
+            )}
+            <p className="text-[10px] text-slate-500 mt-1.5">
+              Angka tahunan = jumlah 12 hari representatif (tanggal 15 tiap bulan) × jumlah hari per bulan. PR = (E<sub>AC</sub> / P<sub>0</sub>) ÷ (H<sub>POA</sub> / 1 kW/m²).
+            </p>
           </div>
 
           {/* Section 3: Estimasi Finansial */}
@@ -173,6 +215,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             <h4 className="font-semibold text-slate-900 mb-1">
               Estimasi Finansial Penghematan Listrik (PLN Golongan B-1 / R-1)
             </h4>
+            <p className="text-[10px] text-slate-600">Asumsi tarif Rp {tarifPLN.toLocaleString('id-ID')}/kWh — sesuaikan dengan tarif PLN yang berlaku.</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2 text-[11px]">
               <div>
                 <span className="text-slate-600 block">Potensi Penghematan Tahunan:</span>

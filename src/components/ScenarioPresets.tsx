@@ -29,6 +29,7 @@ export const ScenarioPresets: React.FC<ScenarioPresetsProps> = ({ onSelectScenar
       mountType: 'rooftop_sloped',
       inverterType: 'string',
       rowSpacing: 2.5,
+      frontRowEnabled: false,
     };
     const obstacles: ObstacleConfig[] = [
       {
@@ -47,11 +48,11 @@ export const ScenarioPresets: React.FC<ScenarioPresetsProps> = ({ onSelectScenar
   };
 
   const loadScenario2 = () => {
-    // Ground Mount: Self-Shading Baris Depan
+    // Ground Mount: Self-Shading Baris Depan (baris identik di depan, pitch terlalu rapat)
     const loc = CITIES_INDONESIA.find((c) => c.name.includes('Surabaya')) || CITIES_INDONESIA[1];
     const array: PVArrayConfig = {
-      moduleCountX: 4,
-      moduleCountY: 2,
+      moduleCountX: 8,
+      moduleCountY: 1,
       moduleWattage: 550,
       moduleLength: 2.27,
       moduleWidth: 1.13,
@@ -60,25 +61,11 @@ export const ScenarioPresets: React.FC<ScenarioPresetsProps> = ({ onSelectScenar
       mountHeight: 0.8,
       mountType: 'ground',
       inverterType: 'string',
-      rowSpacing: 2.2,
+      rowSpacing: 2.4, // minimum aman ±3.8 m pada tilt 20° (α = 25°)
+      frontRowEnabled: true,
     };
-    const obstacles: ObstacleConfig[] = [
-      {
-        id: 'front_row_obs',
-        type: 'front_row',
-        name: 'Baris Panel Depan (Pitch 2.2m)',
-        enabled: true,
-        distance: 2.2,
-        azimuth: 0, // in front (North)
-        height: 1.5,
-        width: 5.0,
-        depth: 1.2,
-        baseElevation: 0,
-      },
-    ];
-    onSelectScenario(loc, array, obstacles, 1, 8.0); // January, 8:00 AM
+    onSelectScenario(loc, array, [], 7, 7.0); // July, 07:00 WIB (self-shading pagi)
   };
-
   const loadScenario3 = () => {
     // Gedung / Ruko: Parapet Atap Sore
     const loc = CITIES_INDONESIA.find((c) => c.name.includes('Bandung')) || CITIES_INDONESIA[2];
@@ -94,6 +81,7 @@ export const ScenarioPresets: React.FC<ScenarioPresetsProps> = ({ onSelectScenar
       mountType: 'rooftop_flat',
       inverterType: 'optimizer',
       rowSpacing: 2.0,
+      frontRowEnabled: false,
     };
     const obstacles: ObstacleConfig[] = [
       {
@@ -127,6 +115,7 @@ export const ScenarioPresets: React.FC<ScenarioPresetsProps> = ({ onSelectScenar
       mountType: 'rooftop_flat',
       inverterType: 'string',
       rowSpacing: 2.5,
+      frontRowEnabled: false,
     };
     onSelectScenario(loc, array, [], 6, 12.0); // June noon
   };
@@ -161,7 +150,7 @@ export const ScenarioPresets: React.FC<ScenarioPresetsProps> = ({ onSelectScenar
             <span>Ground-Mount Self Shade</span>
           </div>
           <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
-            Surabaya (Tilt 20°, Mount 0.8m). Pitch 2.2m terlalu rapat, baris belakang terbayang.
+            Surabaya, Juli (Tilt 20°, Mount 0.8m). Pitch 2.4 m terlalu rapat (minimum ±3.8 m), baris belakang terbayang baris depan.
           </p>
         </button>
 

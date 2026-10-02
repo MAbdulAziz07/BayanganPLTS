@@ -4,8 +4,19 @@ import {
   PVArrayConfig,
   ObstacleConfig,
   ObstacleType,
+  SkyConfig,
 } from '../types/solar';
-import { CITIES_INDONESIA, MONTH_NAMES_ID, getRecommendedTilt } from '../utils/solarMath';
+import {
+  CITIES_INDONESIA,
+  MONTH_NAMES_ID,
+  getRecommendedTilt,
+  getDayOfYear,
+  climateDailyGHI,
+  solarNoonClock,
+  timeZoneLabel,
+  formatClock,
+} from '../utils/solarMath';
+import { calculateInterRowPitch } from '../utils/shadingMath';
 import {
   Sun,
   Compass,
@@ -37,6 +48,8 @@ interface ControlsPanelProps {
   setArrayConfig: React.Dispatch<React.SetStateAction<PVArrayConfig>>;
   obstacles: ObstacleConfig[];
   setObstacles: React.Dispatch<React.SetStateAction<ObstacleConfig[]>>;
+  sky: SkyConfig;
+  setSky: (s: SkyConfig) => void;
 }
 
 export const ControlsPanel: React.FC<ControlsPanelProps> = ({
@@ -52,16 +65,21 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
   setArrayConfig,
   obstacles,
   setObstacles,
+  sky,
+  setSky,
 }) => {
   const [activeSection, setActiveSection] = useState<'time_loc' | 'slope_array' | 'obstacles' | 'electrical'>('time_loc');
 
   const recTilt = getRecommendedTilt(location.latitude);
 
-  const formatHour = (h: number) => {
-    const hours = Math.floor(h);
-    const mins = Math.round((h - hours) * 60);
-    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
-  };
+  const formatHour = formatClock;
+  const tzLabel = timeZoneLabel(location.timezoneOffset);
+  const doy = getDayOfYear(month, 15);
+  const noonClock = solarNoonClock(location.longitude, location.timezoneOffset, doy);
+  const monthGHI = climateDailyGHI(location.latitude, doy, sky.kt);
+  const tableLength = arrayConfig.moduleCountY * arrayConfig.moduleLength;
+  const minPitchInfo = calculateInterRowPitch(tableLength, arrayConfig.tilt, 25);
+  const minPhysicalPitch = Math.ceil((tableLength * Math.cos((arrayConfig.tilt * Math.PI) / 180) + 0.1) * 20) / 20;
 
   const handleCityChange = (cityName: string) => {
     const found = CITIES_INDONESIA.find((c) => c.name === cityName);
@@ -248,6 +266,64 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
               </div>
             </div>
 
+            {/* Kondisi Langit / Model Iklim */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-semibold text-slate-800 flex items-center gap-1.5">
+                  <Sun className="w-3.5 h-3.5 text-amber-500" />
+                  Kondisi Langit (Model Radiasi)
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 mb-2">
+                <button
+                  onClick={() => setSky({ ...sky, mode: 'climate' })}
+                  className={`py-1.5 rounded-lg text-[11px] transition-colors ${
+                    sky.mode === 'climate' ? 'bg-amber-500 text-white font-semibold' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  Rata-rata Iklim (KT)
+                </button>
+                <button
+                  onClick={() => setSky({ ...sky, mode: 'clearsky' })}
+                  className={`py-1.5 rounded-lg text-[11px] transition-colors ${
+                    sky.mode === 'clearsky' ? 'bg-amber-500 text-white font-semibold' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  Langit Cerah (Batas Atas)
+                </button>
+              </div>
+              {sky.mode === 'climate' ? (
+                <>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-600">Indeks Kecerahan Langit (K<sub>T</sub>):</span>
+                    <span className="font-mono font-bold text-amber-600">{sky.kt.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.3"
+                    max="0.75"
+                    step="0.01"
+                    value={sky.kt}
+                    onChange={(e) => setSky({ ...sky, kt: parseFloat(e.target.value) })}
+                    className="w-full accent-amber-500 cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-0.5 font-mono">
+                    <span>0.30 Mendung</span>
+                    <span>0.50 Tipikal</span>
+                    <span>0.75 Cerah</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed">
+                    Radiasi horizontal rata-rata bulan ini: <b className="font-mono text-slate-800">{monthGHI.toFixed(2)} kWh/m²/hari</b>.
+                    Sesuaikan K<sub>T</sub> hingga angka ini sama dengan data lokasi Anda (Global Solar Atlas / NASA POWER).
+                  </p>
+                </>
+              ) : (
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Model langit tanpa awan — menghasilkan produksi maksimum teoretis. Gunakan hanya sebagai pembanding.
+                </p>
+              )}
+            </div>
+
             {/* Jam & Playback Animasi Matahari */}
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
               <div className="flex items-center justify-between mb-2">
@@ -256,14 +332,14 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
                   Waktu Simulasi
                 </span>
                 <span className="font-mono text-base font-bold text-amber-600 tabular-nums">
-                  {formatHour(hour)} WIB
+                  {formatHour(hour)} {tzLabel}
                 </span>
               </div>
 
               <input
                 type="range"
-                min="6"
-                max="18"
+                min="5"
+                max="19"
                 step="0.1"
                 value={hour}
                 onChange={(e) => setHour(parseFloat(e.target.value))}
@@ -308,6 +384,11 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
                   ))}
                 </div>
               </div>
+              <p className="text-[11px] text-slate-500 mt-2">
+                Jam dalam waktu lokal ({tzLabel}). Matahari tertinggi (tengah hari surya) pada{' '}
+                <b className="font-mono text-slate-700">{formatHour(noonClock)} {tzLabel}</b> — bergeser karena bujur lokasi
+                ({location.longitude.toFixed(1)}° BT) dan equation of time.
+              </p>
             </div>
 
             {/* Rekomendasi Sudut Berdasarkan Lokasi */}
@@ -327,7 +408,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
               <div className="flex justify-between items-center">
                 <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                  Sudut Kemiringan / Slope (Tilt $\beta$)
+                  Sudut Kemiringan / Slope (Tilt β)
                 </span>
                 <span className="font-mono text-base font-bold text-amber-600 tabular-nums">
                   {arrayConfig.tilt}°
@@ -458,7 +539,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
               <div className="flex justify-between items-center">
                 <span className="font-semibold text-slate-800 flex items-center gap-1.5">
                   <Compass className="w-3.5 h-3.5 text-amber-500" />
-                  Arah Orientasi / Azimuth Hadap ($\gamma$)
+                  Arah Orientasi / Azimuth Hadap (γ)
                 </span>
                 <span className="font-mono text-base font-bold text-amber-600 tabular-nums">
                   {arrayConfig.azimuth}° (
@@ -582,6 +663,62 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
               <span className="text-[11px] text-slate-500 mt-1 block font-mono">
                 Total Kapasitas: {((arrayConfig.moduleCountX * arrayConfig.moduleCountY * arrayConfig.moduleWattage) / 1000).toFixed(2)} kWp
               </span>
+            </div>
+
+            {/* Baris PLTS di depan (multi-baris / self-shading) */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <label className="flex items-center gap-2 font-semibold text-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!arrayConfig.frontRowEnabled}
+                  onChange={(e) =>
+                    setArrayConfig({
+                      ...arrayConfig,
+                      frontRowEnabled: e.target.checked,
+                      rowSpacing: Math.max(arrayConfig.rowSpacing, minPhysicalPitch),
+                    })
+                  }
+                  className="accent-amber-500"
+                />
+                Simulasikan Baris PLTS di Depan (Multi-Baris)
+              </label>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Menambahkan baris modul identik di depan array (arah hadap) untuk menguji bayangan antarbaris (self-shading).
+              </p>
+              {arrayConfig.frontRowEnabled && (
+                <div className="mt-2">
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-600">Jarak Pitch Antar Baris (d):</span>
+                    <span className="font-mono font-bold text-amber-600">{arrayConfig.rowSpacing.toFixed(2)} m</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={minPhysicalPitch}
+                    max={Math.max(12, minPitchInfo.minRowPitch + 3)}
+                    step="0.05"
+                    value={arrayConfig.rowSpacing}
+                    onChange={(e) => setArrayConfig({ ...arrayConfig, rowSpacing: parseFloat(e.target.value) })}
+                    className="w-full accent-amber-500 cursor-pointer"
+                  />
+                  <div className="flex items-center justify-between text-[11px] mt-1">
+                    <span className="text-slate-600">
+                      Minimum (α = 25°): <b className="font-mono">{minPitchInfo.minRowPitch.toFixed(2)} m</b>
+                    </span>
+                    <button
+                      onClick={() => setArrayConfig({ ...arrayConfig, rowSpacing: minPitchInfo.minRowPitch })}
+                      className="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
+                    >
+                      Gunakan Minimum
+                    </button>
+                  </div>
+                  <p className={`text-[11px] mt-1.5 ${arrayConfig.rowSpacing < minPitchInfo.minRowPitch ? 'text-rose-600' : 'text-emerald-700'}`}>
+                    {arrayConfig.rowSpacing < minPitchInfo.minRowPitch
+                      ? `Pitch lebih rapat dari minimum — baris belakang akan terbayang pada pagi/sore hari.`
+                      : `Pitch memenuhi batas minimum untuk elevasi matahari ≥ 25°.`}{' '}
+                    Panjang meja searah kemiringan: {tableLength.toFixed(2)} m.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -711,7 +848,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
                         <div className="grid grid-cols-2 gap-2 p-2 bg-white rounded-lg border border-slate-200">
                           <div>
                             <div className="flex justify-between text-slate-700 mb-0.5 font-medium">
-                              <span>Tinggi Objek ($H$):</span>
+                              <span>Tinggi Objek (H):</span>
                               <span className="font-mono text-amber-600 font-bold">{obs.height} m</span>
                             </div>
                             <input

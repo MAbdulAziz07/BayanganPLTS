@@ -1,17 +1,20 @@
 import React, { useState, useMemo } from 'react';
-import { LocationConfig, PVArrayConfig } from '../types/solar';
-import { calculateSolarPosition, calculateIrradiance, getDayOfYear, getRecommendedTilt } from '../utils/solarMath';
+import { LocationConfig, PVArrayConfig, SkyConfig } from '../types/solar';
+import { getRecommendedTilt, DAYS_IN_MONTH } from '../utils/solarMath';
+import { unshadedDailyKWhPerKWp } from '../utils/pvModel';
 import { Compass, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
 
 interface TiltSensitivityChartProps {
   location: LocationConfig;
   arrayConfig: PVArrayConfig;
+  sky: SkyConfig;
   onApplyTilt: (tilt: number, azimuth: number) => void;
 }
 
 export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
   location,
   arrayConfig,
+  sky,
   onApplyTilt,
 }) => {
   const [selectedAzimuth, setSelectedAzimuth] = useState<number>(arrayConfig.azimuth);
@@ -27,34 +30,14 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
       soilingRisk: 'Tinggi (Air Tergenang)' | 'Rendah (Self-Cleaning)' | 'Sangat Baik';
     }[] = [];
 
-    // Sample across 12 representative mid-months
-    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
     let maxYield = 0;
 
-    for (let t = 0; t <= 55; t += 5) {
+    // Same model as the main simulation (sky model, temperature, tilt-dependent soiling,
+    // wiring & inverter losses), 12 representative mid-month days.
+    for (let t = 0; t <= 60; t += 5) {
       let annualKWh = 0;
-
-      for (let m = 0; m < 12; m++) {
-        const doy = getDayOfYear(months[m], 15);
-        let dailyKWh = 0;
-
-        for (let h = 6; h <= 18; h += 1) {
-          const sPos = calculateSolarPosition(location.latitude, doy, h);
-          if (sPos.isDaylight) {
-            const irr = calculateIrradiance(sPos, t, selectedAzimuth);
-            // STC power per 1 kWp = irr.poaTotalUnshaded / 1000 * 0.9 * 0.96
-            dailyKWh += (irr.poaTotalUnshaded / 1000) * 0.86;
-          }
-        }
-
-        // Penalty for low tilt in tropical climate due to dirt/dust accumulation without rain cleaning
-        let soilingFactor = 1.0;
-        if (t === 0) soilingFactor = 0.90; // -10% permanent soiling on flat glass
-        else if (t === 5) soilingFactor = 0.95; // -5% soiling
-
-        annualKWh += dailyKWh * daysInMonth[m] * soilingFactor;
+      for (let m = 1; m <= 12; m++) {
+        annualKWh += unshadedDailyKWhPerKWp(location.latitude, m, t, selectedAzimuth, sky) * DAYS_IN_MONTH[m - 1];
       }
 
       maxYield = Math.max(maxYield, annualKWh);
@@ -76,7 +59,7 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
       ...r,
       relativePercent: Math.round((r.annualYieldKWhPerKWp / maxYield) * 100),
     }));
-  }, [location.latitude, selectedAzimuth]);
+  }, [location.latitude, selectedAzimuth, sky]);
 
   // Find optimal tilt in current simulation
   const optimalItem = [...tiltData].sort((a, b) => b.annualYieldKWhPerKWp - a.annualYieldKWhPerKWp)[0];
@@ -87,7 +70,7 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
           <h2 className="text-base font-bold text-slate-900">
-            Analisis Pengaruh Sudut Kemiringan (Slope / Tilt Angle $\beta$)
+            Analisis Pengaruh Sudut Kemiringan (Slope / Tilt Angle β)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Optimasi sudut kemiringan PLTS untuk wilayah lintang {location.latitude.toFixed(2)}° ({location.name}).
@@ -165,7 +148,7 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
             Grafik Sensitivitas Produksi Energi Tahunan vs Sudut Kemiringan
           </span>
           <span className="text-slate-500 text-[11px] font-mono">
-            Estimasi kWh per kWp per Tahun
+            Estimasi kWh per kWp per Tahun · {sky.mode === 'climate' ? `iklim rata-rata (KT ${sky.kt.toFixed(2)})` : 'langit cerah'}
           </span>
         </div>
 

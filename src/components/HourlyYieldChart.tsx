@@ -1,9 +1,11 @@
+import { formatClock } from '../utils/solarMath';
 import React from 'react';
 import { HourlySimPoint, DailySimulationResult } from '../types/solar';
 
 interface HourlyYieldChartProps {
   dailyResult: DailySimulationResult;
   currentHour: number;
+  tzLabel?: string;
   onSelectHour: (hour: number) => void;
 }
 
@@ -11,6 +13,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
   dailyResult,
   currentHour,
   onSelectHour,
+  tzLabel = 'WIB',
 }) => {
   const { hourly } = dailyResult;
   if (!hourly || hourly.length === 0) return null;
@@ -31,7 +34,9 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
   const maxPower = Math.max(0.5, Math.ceil(dailyResult.systemCapacityKWp * 1.1));
 
   // Compute SVG polyline points for POA (left Y axis) and Power (right Y axis)
-  const getX = (h: number) => padLeft + ((h - 6) / 12) * chartW;
+  const H_START = 5;
+  const H_END = 19;
+  const getX = (h: number) => padLeft + ((h - H_START) / (H_END - H_START)) * chartW;
   const getYPOA = (poa: number) => padTop + chartH - (Math.min(maxPOA, poa) / maxPOA) * chartH;
   const getYPower = (kw: number) => padTop + chartH - (Math.min(maxPower, kw) / maxPower) * chartH;
 
@@ -170,7 +175,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
           />
 
           {/* Current Hour Indicator Vertical Line */}
-          {currentHour >= 6 && currentHour <= 18 && (
+          {currentHour >= H_START && currentHour <= H_END && (
             <g>
               <line
                 x1={getX(currentHour)}
@@ -194,7 +199,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
           )}
 
           {/* X Axis Hours */}
-          {[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map((h) => (
+          {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((h) => (
             <g key={h}>
               <line
                 x1={getX(h)}
@@ -226,7 +231,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
               className="cursor-pointer hover:fill-amber-500/10"
               onClick={() => onSelectHour(pt.hour)}
             >
-              <title>{`Jam ${pt.hour.toFixed(1)}: ${pt.acPowerKW.toFixed(2)} kW (Rugi: ${pt.shadingLossPercent}%)`}</title>
+              <title>{`Pukul ${formatClock(pt.hour)} ${tzLabel}: ${pt.acPowerKW.toFixed(2)} kW (Rugi: ${pt.shadingLossPercent}%)`}</title>
             </rect>
           ))}
         </svg>
@@ -241,7 +246,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
           </span>
         </div>
         <div className="text-slate-800 font-mono">
-          Puncak Daya: <b className="text-sky-700">{dailyResult.peakPowerKW.toFixed(2)} kW</b> pada pukul 12:00
+          Puncak Daya: <b className="text-sky-700">{dailyResult.peakPowerKW.toFixed(2)} kW</b> pada pukul {formatClock(dailyResult.peakHour)} {tzLabel}
         </div>
       </div>
     </div>
