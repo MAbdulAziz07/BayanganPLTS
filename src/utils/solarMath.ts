@@ -79,8 +79,10 @@ export function calculateSolarPosition(
   const gammaRad = Math.acos(cosAzimuth);
   let azimuthDeg = gammaRad * RAD2DEG;
 
-  // Adjust for morning vs afternoon (hour angle < 0 is morning / East, > 0 is afternoon / West)
-  if (hourAngleDeg > 0) {
+  // Adjust for morning vs afternoon (hour angle < 0 is morning / East, > 0 is afternoon / West).
+  // acos() gives the angle measured from South; after the +180° shift below, morning must land
+  // on the East side (0–180°) and afternoon on the West side (180–360°).
+  if (hourAngleDeg < 0) {
     azimuthDeg = 360 - azimuthDeg;
   }
 
