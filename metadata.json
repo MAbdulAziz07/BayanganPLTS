@@ -1,0 +1,8 @@
+{
+  "name": "Remix Simulasi Slope \u0026 Bayangan PLTS",
+  "description": "Simulasi interaktif pengaruh sudut kemiringan (tilt/slope), orientasi (azimuth), dan bayangan rintangan terhadap kinerja dan produksi energi PLTS (Solar PV).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
