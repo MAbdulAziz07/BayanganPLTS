@@ -20,6 +20,14 @@ export interface ObstacleConfig {
   baseElevation?: number; // meters (elevasi dasar rintangan di atas permukaan tanah/lantai dasar)
 }
 
+export type PanelColorMode =
+  | 'high_contrast'   // Perak / Silver-Platinum (Kontras Maksimal untuk Bayangan)
+  | 'bright_cyan'     // Cyan Terang / Ice Blue
+  | 'golden_amber'    // Kuning Emas (High-Visibility)
+  | 'white_testbed'   // Putih Uji Fotometri (Shadow Projection)
+  | 'sky_blue'        // Biru Terang (Sky Blue)
+  | 'classic_navy';   // Biru Standar Polikristalin
+
 export interface PVArrayConfig {
   moduleCountX: number; // modules per row (e.g. 4)
   moduleCountY: number; // rows (e.g. 2)

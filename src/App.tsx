@@ -4,6 +4,7 @@ import {
   PVArrayConfig,
   ObstacleConfig,
   SkyConfig,
+  PanelColorMode,
 } from './types/solar';
 import {
   CITIES_INDONESIA,
@@ -40,6 +41,7 @@ export default function App() {
   const [hour, setHour] = useState<number>(9.5); // 09:30 AM
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [sky, setSky] = useState<SkyConfig>(DEFAULT_SKY);
+  const [panelColorMode, setPanelColorMode] = useState<PanelColorMode>('high_contrast');
 
   // PV Array Configuration
   const [arrayConfig, setArrayConfig] = useState<PVArrayConfig>({
@@ -178,6 +180,7 @@ export default function App() {
       frontRowEnabled: false,
     });
     setSky(DEFAULT_SKY);
+    setPanelColorMode('high_contrast');
     setObstacles([
       {
         id: 'tree_1',
@@ -254,6 +257,8 @@ export default function App() {
                     timezoneOffset={location.timezoneOffset}
                     dayOfYear={dayOfYear}
                     hour={hour}
+                    panelColorMode={panelColorMode}
+                    onPanelColorChange={setPanelColorMode}
                   />
                 </div>
 
@@ -283,6 +288,8 @@ export default function App() {
                   setObstacles={setObstacles}
                   sky={sky}
                   setSky={setSky}
+                  panelColorMode={panelColorMode}
+                  setPanelColorMode={setPanelColorMode}
                 />
               </div>
             </div>

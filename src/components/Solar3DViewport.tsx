@@ -1,10 +1,198 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { PVArrayConfig, ObstacleConfig, SolarPosition, ModuleShadingState } from '../types/solar';
+import { PVArrayConfig, ObstacleConfig, SolarPosition, ModuleShadingState, PanelColorMode } from '../types/solar';
 import { DEG2RAD, calculateSolarPosition } from '../utils/solarMath';
 import { frontRowOffset, getTreeGeometry } from '../utils/shadingMath';
-import { Compass, Eye, Sun, Maximize2, ShieldAlert } from 'lucide-react';
+import { Compass, Eye, Sun, Maximize2, ShieldAlert, Palette, Check, ChevronDown, X } from 'lucide-react';
+
+export const PANEL_COLOR_OPTIONS: {
+  id: PanelColorMode;
+  label: string;
+  shortLabel: string;
+  badge: string;
+  description: string;
+  swatchClass: string;
+  borderClass: string;
+  dotColor: string;
+}[] = [
+  {
+    id: 'high_contrast',
+    label: 'Perak Kontras Tinggi (Silver-Platinum)',
+    shortLabel: 'Perak (Kontras Tinggi)',
+    badge: 'Rekomendasi Utama',
+    description: 'Permukaan perak terang; bayangan pohon & gedung tampak sangat hitam pekat dan tajam',
+    swatchClass: 'bg-slate-200',
+    borderClass: 'border-slate-400',
+    dotColor: '#e2e8f0',
+  },
+  {
+    id: 'golden_amber',
+    label: 'Kuning Emas (High-Visibility)',
+    shortLabel: 'Kuning Emas',
+    badge: 'Kontras Ekstrem',
+    description: 'Warna kuning cerah dengan sensitivitas mata tertinggi terhadap bayangan hitam pekat',
+    swatchClass: 'bg-amber-300',
+    borderClass: 'border-amber-500',
+    dotColor: '#fde047',
+  },
+  {
+    id: 'white_testbed',
+    label: 'Putih Uji (Lab Shadow Canvas)',
+    shortLabel: 'Putih Uji',
+    badge: 'Fotometri',
+    description: 'Kanvas putih proyeksi murni tanpa bias warna, siluet bayangan 100% presisi',
+    swatchClass: 'bg-white',
+    borderClass: 'border-slate-300',
+    dotColor: '#ffffff',
+  },
+  {
+    id: 'bright_cyan',
+    label: 'Cyan Terang (Electric Ice Blue)',
+    shortLabel: 'Cyan Terang',
+    badge: 'Modern',
+    description: 'Tampilan sel surya modern cerah dengan visibilitas bayangan sangat jelas',
+    swatchClass: 'bg-sky-400',
+    borderClass: 'border-sky-600',
+    dotColor: '#38bdf8',
+  },
+  {
+    id: 'sky_blue',
+    label: 'Biru Langit (Sky Blue)',
+    shortLabel: 'Biru Langit',
+    badge: 'Estetik',
+    description: 'Biru cerah yang jauh lebih mudah melihat bayangan dibanding biru tua',
+    swatchClass: 'bg-blue-400',
+    borderClass: 'border-blue-600',
+    dotColor: '#60a5fa',
+  },
+  {
+    id: 'classic_navy',
+    label: 'Biru Safir Klasik',
+    shortLabel: 'Biru Standar',
+    badge: 'Polikristalin',
+    description: 'Warna panel surya polikristalin standar komersial konvensional',
+    swatchClass: 'bg-blue-900',
+    borderClass: 'border-blue-950',
+    dotColor: '#1e3a8a',
+  },
+];
+
+// Helper: Creates high-contrast solar cell texture with wafer grid & bypass diode sub-string zones
+function createModuleCanvasTexture(colorMode: PanelColorMode): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.CanvasTexture(canvas);
+
+  let baseFill = '#94a3b8';
+  let cellFill = '#f1f5f9';
+  let busbarColor = 'rgba(71, 85, 105, 0.45)';
+  let cellBorder = '#cbd5e1';
+  let dividerColor = 'rgba(51, 65, 85, 0.85)';
+
+  if (colorMode === 'high_contrast') {
+    // Silver / Platinum: Extremely bright reflective surface, shadows cast on it are pitch dark & razor-sharp!
+    baseFill = '#94a3b8';
+    cellFill = '#f1f5f9';
+    busbarColor = 'rgba(71, 85, 105, 0.45)';
+    cellBorder = '#cbd5e1';
+    dividerColor = 'rgba(51, 65, 85, 0.9)';
+  } else if (colorMode === 'golden_amber') {
+    // High-visibility gold/yellow: maximum optical contrast with black shadows
+    baseFill = '#d97706';
+    cellFill = '#fde047';
+    busbarColor = 'rgba(180, 83, 9, 0.5)';
+    cellBorder = '#facc15';
+    dividerColor = 'rgba(146, 64, 14, 0.9)';
+  } else if (colorMode === 'white_testbed') {
+    // Pure white photometric testbed
+    baseFill = '#e2e8f0';
+    cellFill = '#ffffff';
+    busbarColor = 'rgba(148, 163, 184, 0.45)';
+    cellBorder = '#f1f5f9';
+    dividerColor = 'rgba(100, 116, 139, 0.7)';
+  } else if (colorMode === 'bright_cyan') {
+    baseFill = '#0284c7';
+    cellFill = '#38bdf8';
+    busbarColor = 'rgba(255, 255, 255, 0.65)';
+    cellBorder = '#7dd3fc';
+    dividerColor = 'rgba(255, 255, 255, 0.95)';
+  } else if (colorMode === 'sky_blue') {
+    baseFill = '#1d4ed8';
+    cellFill = '#60a5fa';
+    busbarColor = 'rgba(255, 255, 255, 0.6)';
+    cellBorder = '#93c5fd';
+    dividerColor = 'rgba(255, 255, 255, 0.95)';
+  } else if (colorMode === 'classic_navy') {
+    baseFill = '#0f172a';
+    cellFill = '#1e3a8a';
+    busbarColor = 'rgba(255, 255, 255, 0.35)';
+    cellBorder = '#172554';
+    dividerColor = 'rgba(255, 255, 255, 0.8)';
+  }
+
+  // Base wafer background
+  ctx.fillStyle = baseFill;
+  ctx.fillRect(0, 0, 512, 1024);
+
+  // 6 columns x 10 rows of solar cells with subtle wafer gaps
+  const cols = 6;
+  const rows = 10;
+  const cellW = 512 / cols;
+  const cellH = 1024 / rows;
+  const gap = 3;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = c * cellW;
+      const y = r * cellH;
+
+      // Solar cell wafer (slightly rounded corners for modern cell realism)
+      ctx.fillStyle = cellFill;
+      ctx.beginPath();
+      const radius = 4;
+      const rx = x + gap;
+      const ry = y + gap;
+      const rw = cellW - gap * 2;
+      const rh = cellH - gap * 2;
+      ctx.roundRect(rx, ry, rw, rh, radius);
+      ctx.fill();
+
+      // Subtle cell border
+      ctx.strokeStyle = cellBorder;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Fine busbars across each cell
+      ctx.strokeStyle = busbarColor;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(x + cellW * 0.25, ry + 2);
+      ctx.lineTo(x + cellW * 0.25, ry + rh - 2);
+      ctx.moveTo(x + cellW * 0.5, ry + 2);
+      ctx.lineTo(x + cellW * 0.5, ry + rh - 2);
+      ctx.moveTo(x + cellW * 0.75, ry + 2);
+      ctx.lineTo(x + cellW * 0.75, ry + rh - 2);
+      ctx.stroke();
+    }
+  }
+
+  // 3 distinct Sub-string divider lines (bypass diode string zones)
+  ctx.strokeStyle = dividerColor;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(cellW * 2, 0);
+  ctx.lineTo(cellW * 2, 1024);
+  ctx.moveTo(cellW * 4, 0);
+  ctx.lineTo(cellW * 4, 1024);
+  ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 interface Solar3DViewportProps {
   arrayConfig: PVArrayConfig;
@@ -17,6 +205,8 @@ interface Solar3DViewportProps {
   timezoneOffset: number;
   dayOfYear: number;
   hour: number;
+  panelColorMode?: PanelColorMode;
+  onPanelColorChange?: (mode: PanelColorMode) => void;
 }
 
 export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
@@ -30,6 +220,8 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
   timezoneOffset,
   dayOfYear,
   hour,
+  panelColorMode,
+  onPanelColorChange,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -47,6 +239,33 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
 
   const [viewPreset, setViewPreset] = useState<'perspective' | 'top' | 'side' | 'sun'>('perspective');
   const [showSunArc, setShowSunArc] = useState(true);
+  const [internalPanelColorMode, setInternalPanelColorMode] = useState<PanelColorMode>('high_contrast');
+  const activeColorMode = panelColorMode ?? internalPanelColorMode;
+  const [isColorMenuOpen, setIsColorMenuOpen] = useState(false);
+  const colorMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close color dropdown when clicking outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (colorMenuRef.current && !colorMenuRef.current.contains(e.target as Node)) {
+        setIsColorMenuOpen(false);
+      }
+    };
+    if (isColorMenuOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [isColorMenuOpen]);
+
+  const handleColorChange = (mode: PanelColorMode) => {
+    if (onPanelColorChange) {
+      onPanelColorChange(mode);
+    } else {
+      setInternalPanelColorMode(mode);
+    }
+  };
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -89,16 +308,16 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     controls.target.set(0, 1.2, 0);
     controlsRef.current = controls;
 
-    // Ambient light - balanced for distinct, high-contrast shadows on white ground
-    const ambientLight = new THREE.AmbientLight(0xdbeafe, 0.5);
+    // Ambient light - balanced for distinct, high-contrast shadows on white ground and panels
+    const ambientLight = new THREE.AmbientLight(0xdbeafe, 0.32);
     scene.add(ambientLight);
 
     // Hemisphere light for sky/ground contrast
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xe2e8f0, 0.4);
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xe2e8f0, 0.22);
     scene.add(hemiLight);
 
     // Directional Sun Light
-    const sunLight = new THREE.DirectionalLight(0xfffaed, 2.7);
+    const sunLight = new THREE.DirectionalLight(0xfffaed, 3.2);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 2048;
     sunLight.shadow.mapSize.height = 2048;
@@ -109,8 +328,8 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     sunLight.shadow.camera.right = d;
     sunLight.shadow.camera.top = d;
     sunLight.shadow.camera.bottom = -d;
-    sunLight.shadow.bias = -0.0004;
-    sunLight.shadow.normalBias = 0.02;
+    sunLight.shadow.bias = -0.0002;
+    sunLight.shadow.normalBias = 0.015;
     scene.add(sunLight);
     sunLightRef.current = sunLight;
 
@@ -209,7 +428,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     if (solarPos.isDaylight && solarPos.altitude > 0) {
       sunLightRef.current.position.set(sunX, sunY, sunZ);
       sunLightRef.current.target.position.set(0, 1.2, 0);
-      sunLightRef.current.intensity = 2.4 * Math.sin(altRad);
+      sunLightRef.current.intensity = 3.2 * Math.sin(altRad);
       sunLightRef.current.visible = true;
 
       sunMeshRef.current.position.set(sunX, sunY, sunZ);
@@ -297,11 +516,13 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
       tiltGroup.add(railMesh);
     }
 
-    // Build individual modules
-    const frameMat = new THREE.MeshStandardMaterial({
-      color: 0x64748b,
-      metalness: 0.7,
-      roughness: 0.4,
+    // Build individual modules with high-contrast bright color for maximum shadow visibility
+    const moduleTexture = createModuleCanvasTexture(activeColorMode);
+
+    const normalFrameMat = new THREE.MeshStandardMaterial({
+      color: 0xcbd5e1, // clean bright anodized aluminum silver
+      metalness: 0.65,
+      roughness: 0.35,
     });
 
     const cellGeom = new THREE.PlaneGeometry(moduleWidth - 0.04, moduleLength - 0.04);
@@ -320,35 +541,30 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         const modGroup = new THREE.Group();
         modGroup.position.set(posX, 0, posZ);
 
-        // Aluminum module frame
+        // Aluminum module frame (turns glowing amber/red when shaded for crystal-clear electrical status)
+        const frameMat = isShaded
+          ? new THREE.MeshStandardMaterial({
+              color: state.relativePower <= 0.33 ? 0xef4444 : 0xf59e0b,
+              emissive: state.relativePower <= 0.33 ? 0x991b1b : 0x78350f,
+              metalness: 0.4,
+              roughness: 0.3,
+            })
+          : normalFrameMat;
+
         const frameMesh = new THREE.Mesh(borderGeom, frameMat);
         frameMesh.position.set(0, 0, 0);
         frameMesh.castShadow = true;
         frameMesh.receiveShadow = true;
         modGroup.add(frameMesh);
 
-        // Photovoltaic cell face
-        // Color changes to indicate shading / bypass status
-        let cellColor = 0x0f2744; // normal rich solar navy blue
-        let cellEmissive = 0x000000;
-
-        if (isShaded) {
-          if (state.relativePower <= 0.1) {
-            cellColor = 0x1f1f2e; // deeply shaded
-            cellEmissive = 0x3f1515; // faint warning tint
-          } else if (state.relativePower <= 0.4) {
-            cellColor = 0x1e293b;
-            cellEmissive = 0x3d2005;
-          } else {
-            cellColor = 0x18283d;
-          }
-        }
-
+        // Photovoltaic cell face: bright, high-contrast wafer texture
+        // Direct sunlight creates vibrant illumination; physical shadows cast upon it produce dark, crisp, clear silhouettes!
+        // Emissive is 0x000000 so that physical shadows are never washed out or faded!
         const cellMat = new THREE.MeshStandardMaterial({
-          color: cellColor,
-          emissive: cellEmissive,
-          roughness: 0.25,
-          metalness: 0.55,
+          map: moduleTexture,
+          color: 0xffffff,
+          roughness: 0.45,
+          metalness: 0.08,
         });
 
         const cellMesh = new THREE.Mesh(cellGeom, cellMat);
@@ -404,7 +620,11 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
       frontGroup.rotation.order = 'YXZ';
       frontGroup.rotation.y = (azimuth + 180) * DEG2RAD;
       frontGroup.rotation.x = -tilt * DEG2RAD;
-      const slabMat = new THREE.MeshStandardMaterial({ color: 0x1e3a5f, roughness: 0.35, metalness: 0.5, transparent: true, opacity: 0.9 });
+      const slabMat = new THREE.MeshStandardMaterial({
+        map: moduleTexture,
+        roughness: 0.3,
+        metalness: 0.05,
+      });
       const slab = new THREE.Mesh(new THREE.BoxGeometry(totalW, 0.04, totalL), slabMat);
       slab.castShadow = true;
       slab.receiveShadow = true;
@@ -422,7 +642,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         group.add(leg);
       });
     }
-  }, [arrayConfig, moduleStates]);
+  }, [arrayConfig, moduleStates, activeColorMode]);
 
   // Update Obstacles in 3D Scene
   useEffect(() => {
@@ -603,11 +823,11 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
       {/* Viewport Floating Overlay Controls - Bright Theme */}
-      <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5 p-1 bg-white/90 backdrop-blur-md rounded-lg border border-slate-200 shadow-md text-xs">
+      <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5 p-1 bg-white/95 backdrop-blur-md rounded-lg border border-slate-200 shadow-md text-xs z-10">
         <button
           onClick={() => setCameraView('perspective')}
           className={`px-2.5 py-1 rounded font-medium transition-colors ${
-            viewPreset === 'perspective' ? 'bg-amber-500 text-white font-semibold shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            viewPreset === 'perspective' ? 'bg-amber-500 text-white font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           Perspektif 3D
@@ -615,7 +835,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         <button
           onClick={() => setCameraView('top')}
           className={`px-2.5 py-1 rounded font-medium transition-colors ${
-            viewPreset === 'top' ? 'bg-amber-500 text-white font-semibold shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            viewPreset === 'top' ? 'bg-amber-500 text-white font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           Atas (Top)
@@ -623,7 +843,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         <button
           onClick={() => setCameraView('side')}
           className={`px-2.5 py-1 rounded font-medium transition-colors ${
-            viewPreset === 'side' ? 'bg-amber-500 text-white font-semibold shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            viewPreset === 'side' ? 'bg-amber-500 text-white font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
           }`}
         >
           Samping (Tilt)
@@ -633,7 +853,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
           disabled={!solarPos.isDaylight}
           className={`px-2.5 py-1 rounded font-medium transition-colors ${
             viewPreset === 'sun'
-              ? 'bg-amber-500 text-white font-semibold shadow-sm'
+              ? 'bg-amber-500 text-white font-semibold shadow-xs'
               : solarPos.isDaylight
               ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               : 'text-slate-300 cursor-not-allowed'
@@ -644,17 +864,117 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         </button>
       </div>
 
-      {/* Sun Arc & Help Toggle - Bright Theme */}
-      <div className="absolute top-3 right-3 flex items-center gap-2">
+      {/* Sun Arc & Panel Color Selector - Bright Theme (Right-anchored, does NOT obscure perspective controls on left) */}
+      <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
+        {/* Tombol & Popover Timbul Warna Panel */}
+        <div ref={colorMenuRef} className="relative">
+          <button
+            onClick={() => setIsColorMenuOpen(!isColorMenuOpen)}
+            aria-expanded={isColorMenuOpen}
+            className={`px-2.5 py-1 text-xs rounded-lg backdrop-blur-md border transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
+              isColorMenuOpen
+                ? 'bg-amber-500 text-white border-amber-600 font-semibold ring-2 ring-amber-400/40'
+                : 'bg-white/95 text-slate-700 border-slate-200 hover:text-slate-900 hover:bg-slate-50'
+            }`}
+            title="Klik untuk memilih warna panel surya"
+          >
+            <Palette className={`w-3.5 h-3.5 ${isColorMenuOpen ? 'text-white' : 'text-amber-500'}`} />
+            <span className="font-semibold">Warna Panel</span>
+            <span
+              className={`w-2.5 h-2.5 rounded-full border shadow-2xs ${
+                PANEL_COLOR_OPTIONS.find((c) => c.id === activeColorMode)?.swatchClass || 'bg-slate-200'
+              } ${
+                PANEL_COLOR_OPTIONS.find((c) => c.id === activeColorMode)?.borderClass || 'border-slate-400'
+              }`}
+              aria-hidden="true"
+            />
+            <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isColorMenuOpen ? 'rotate-180 text-white' : 'text-slate-400'}`} />
+          </button>
+
+          {/* Menu Dropdown Timbul (Elevated Popover) - Terletak di Kanan, Tidak Menutup Menu Perspektif di Kiri */}
+          {isColorMenuOpen && (
+            <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white/98 backdrop-blur-md rounded-xl shadow-2xl border border-slate-200 p-2.5 z-30 animate-in fade-in zoom-in-95 duration-150 origin-top-right">
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                  <Palette className="w-3.5 h-3.5 text-amber-500" />
+                  Warna Visibilitas Bayangan
+                </span>
+                <button
+                  onClick={() => setIsColorMenuOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                  title="Tutup Menu"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <p className="text-[11px] text-slate-500 mb-2 leading-relaxed px-1">
+                Pilih warna modul agar siluet bayangan rintangan (pohon/gedung) tampak sangat kontras di permukaan panel:
+              </p>
+
+              <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-0.5">
+                {PANEL_COLOR_OPTIONS.map((opt) => {
+                  const isSelected = activeColorMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => handleColorChange(opt.id)}
+                      className={`w-full p-2 rounded-lg text-left text-xs transition-all border flex items-center justify-between gap-2 cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-50/90 border-amber-400 text-amber-950 shadow-xs ring-1 ring-amber-400/40'
+                          : 'bg-white hover:bg-slate-50 border-slate-200/80 text-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <span
+                          className={`w-4 h-4 rounded-full border shadow-2xs mt-0.5 shrink-0 ${opt.swatchClass} ${opt.borderClass}`}
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-xs text-slate-900">{opt.shortLabel}</span>
+                            <span
+                              className={`text-[9px] px-1.5 py-0.2 rounded font-medium ${
+                                isSelected ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {opt.badge}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 leading-tight mt-0.5 truncate">
+                            {opt.description}
+                          </p>
+                        </div>
+                      </div>
+
+                      {isSelected ? (
+                        <Check className="w-4 h-4 text-amber-600 shrink-0" />
+                      ) : (
+                        <span className="w-4 h-4 shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-2.5 pt-2 border-t border-slate-100 px-1">
+                <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-1 rounded block leading-tight border border-amber-200/60">
+                  💡 <b>Rekomendasi:</b> Pilih <b>Perak</b> atau <b>Kuning Emas</b> untuk kontras bayangan paling hitam & pekat.
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
         <button
           onClick={() => setShowSunArc(!showSunArc)}
-          className={`px-2.5 py-1 text-xs rounded-lg backdrop-blur-md border transition-colors shadow-sm ${
+          className={`px-2.5 py-1 text-xs rounded-lg backdrop-blur-md border transition-colors shadow-md ${
             showSunArc
               ? 'bg-amber-500 text-white border-amber-600 font-medium'
-              : 'bg-white/90 text-slate-600 border-slate-200 hover:text-slate-900 hover:bg-slate-50'
+              : 'bg-white/95 text-slate-600 border-slate-200 hover:text-slate-900 hover:bg-slate-50'
           }`}
         >
-          Lintasan Matahari {showSunArc ? 'ON' : 'OFF'}
+          Lintasan {showSunArc ? 'ON' : 'OFF'}
         </button>
       </div>
 

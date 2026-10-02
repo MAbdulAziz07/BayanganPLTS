@@ -5,6 +5,7 @@ import {
   ObstacleConfig,
   ObstacleType,
   SkyConfig,
+  PanelColorMode,
 } from '../types/solar';
 import {
   CITIES_INDONESIA,
@@ -17,6 +18,7 @@ import {
   formatClock,
 } from '../utils/solarMath';
 import { calculateInterRowPitch } from '../utils/shadingMath';
+import { PANEL_COLOR_OPTIONS } from './Solar3DViewport';
 import {
   Sun,
   Compass,
@@ -33,6 +35,7 @@ import {
   ArrowUp,
   ShieldCheck,
   ShieldAlert,
+  Palette,
 } from 'lucide-react';
 
 interface ControlsPanelProps {
@@ -50,6 +53,8 @@ interface ControlsPanelProps {
   setObstacles: React.Dispatch<React.SetStateAction<ObstacleConfig[]>>;
   sky: SkyConfig;
   setSky: (s: SkyConfig) => void;
+  panelColorMode?: PanelColorMode;
+  setPanelColorMode?: (mode: PanelColorMode) => void;
 }
 
 export const ControlsPanel: React.FC<ControlsPanelProps> = ({
@@ -67,6 +72,8 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
   setObstacles,
   sky,
   setSky,
+  panelColorMode = 'high_contrast',
+  setPanelColorMode,
 }) => {
   const [activeSection, setActiveSection] = useState<'time_loc' | 'slope_array' | 'obstacles' | 'electrical'>('time_loc');
 
@@ -663,6 +670,61 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
               <span className="text-[11px] text-slate-500 mt-1 block font-mono">
                 Total Kapasitas: {((arrayConfig.moduleCountX * arrayConfig.moduleCountY * arrayConfig.moduleWattage) / 1000).toFixed(2)} kWp
               </span>
+            </div>
+
+            {/* WARNA PANEL SURYA (MEMPERMUDAH MELIHAT BAYANGAN) */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-slate-800 flex items-center gap-1.5 text-xs sm:text-sm">
+                  <Palette className="w-4 h-4 text-amber-500" />
+                  Warna Panel (Visibilitas Bayangan)
+                </span>
+                <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                  {PANEL_COLOR_OPTIONS.find((c) => c.id === panelColorMode)?.shortLabel || 'Kontras'}
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Pilih warna modul untuk mempertegas kontras bayangan rintangan (pohon/gedung) pada permukaan sel:
+              </p>
+
+              <div className="grid grid-cols-2 gap-2">
+                {PANEL_COLOR_OPTIONS.map((opt) => {
+                  const isSelected = panelColorMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => setPanelColorMode?.(opt.id)}
+                      className={`p-2 rounded-lg text-left text-xs transition-all border flex flex-col gap-1 ${
+                        isSelected
+                          ? 'bg-amber-500 text-white border-amber-600 shadow-xs font-medium'
+                          : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-100 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 w-full">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`w-3.5 h-3.5 rounded-full border shadow-2xs shrink-0 ${opt.swatchClass} ${opt.borderClass}`}
+                          />
+                          <span className="font-semibold truncate">{opt.shortLabel}</span>
+                        </div>
+                        {isSelected && (
+                          <span className="text-[10px] bg-white/25 px-1 py-0.2 rounded font-bold shrink-0">
+                            Aktif
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-[10px] leading-tight line-clamp-2 ${isSelected ? 'text-amber-50' : 'text-slate-500'}`}>
+                        {opt.description}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <p className="text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200">
+                💡 <b>Rekomendasi:</b> Gunakan warna <b>Perak (Kontras Tinggi)</b> atau <b>Kuning Emas</b> agar siluet bayangan pohon, gedung sekitar, atau baris depan terlihat sangat tajam dan tidak tertutup warna biru tua gelap.
+              </p>
             </div>
 
             {/* Baris PLTS di depan (multi-baris / self-shading) */}
