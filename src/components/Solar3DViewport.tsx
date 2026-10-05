@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { PVArrayConfig, ObstacleConfig, SolarPosition, ModuleShadingState, PanelColorMode } from '../types/solar';
+import { PVArrayConfig, ObstacleConfig, SolarPosition, PanelColorMode } from '../types/solar';
 import { DEG2RAD, calculateSolarPosition } from '../utils/solarMath';
 import { frontRowOffset, getTreeGeometry } from '../utils/shadingMath';
 import { Compass, Eye, Sun, Maximize2, ShieldAlert, Palette, Check, ChevronDown, X } from 'lucide-react';
@@ -198,7 +198,6 @@ interface Solar3DViewportProps {
   arrayConfig: PVArrayConfig;
   obstacles: ObstacleConfig[];
   solarPos: SolarPosition;
-  moduleStates: ModuleShadingState[];
   totalShadedFraction: number;
   latitude: number;
   longitude: number;
@@ -213,7 +212,6 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
   arrayConfig,
   obstacles,
   solarPos,
-  moduleStates,
   totalShadedFraction,
   latitude,
   longitude,
@@ -239,7 +237,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
 
   const [viewPreset, setViewPreset] = useState<'perspective' | 'top' | 'side' | 'sun'>('perspective');
   const [showSunArc, setShowSunArc] = useState(true);
-  const [internalPanelColorMode, setInternalPanelColorMode] = useState<PanelColorMode>('high_contrast');
+  const [internalPanelColorMode, setInternalPanelColorMode] = useState<PanelColorMode>('classic_navy');
   const activeColorMode = panelColorMode ?? internalPanelColorMode;
   const [isColorMenuOpen, setIsColorMenuOpen] = useState(false);
   const colorMenuRef = useRef<HTMLDivElement>(null);
@@ -278,8 +276,8 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     // Scene
     const scene = new THREE.Scene();
     sceneRef.current = scene;
-    scene.background = new THREE.Color(0xffffff);
-    scene.fog = new THREE.Fog(0xffffff, 45, 95);
+    scene.background = new THREE.Color(0xb9d8f0);
+    scene.fog = new THREE.Fog(0xc6dff0, 55, 110);
 
     // Camera
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 200);
@@ -293,7 +291,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 0.92;
     rendererRef.current = renderer;
 
     container.appendChild(renderer.domElement);
@@ -313,11 +311,11 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     scene.add(ambientLight);
 
     // Hemisphere light for sky/ground contrast
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xe2e8f0, 0.22);
+    const hemiLight = new THREE.HemisphereLight(0xd9edff, 0x71835c, 0.65);
     scene.add(hemiLight);
 
     // Directional Sun Light
-    const sunLight = new THREE.DirectionalLight(0xfffaed, 3.2);
+    const sunLight = new THREE.DirectionalLight(0xffedcf, 2.5);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 2048;
     sunLight.shadow.mapSize.height = 2048;
@@ -330,12 +328,14 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     sunLight.shadow.camera.bottom = -d;
     sunLight.shadow.bias = -0.0002;
     sunLight.shadow.normalBias = 0.015;
+    sunLight.shadow.radius = 4;
     scene.add(sunLight);
+    scene.add(sunLight.target);
     sunLightRef.current = sunLight;
 
     // Sun Visual Mesh
-    const sunGeom = new THREE.SphereGeometry(0.7, 32, 32);
-    const sunMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+    const sunGeom = new THREE.SphereGeometry(0.42, 32, 32);
+    const sunMat = new THREE.MeshBasicMaterial({ color: 0xffdf91 });
     const sunMesh = new THREE.Mesh(sunGeom, sunMat);
     scene.add(sunMesh);
     sunMeshRef.current = sunMesh;
@@ -353,19 +353,47 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
 
     // Ground Platform - Clean White/Off-White for maximum shadow clarity
     const groundGeom = new THREE.PlaneGeometry(60, 60, 32, 32);
+    const groundCanvas = document.createElement('canvas');
+    groundCanvas.width = 512;
+    groundCanvas.height = 512;
+    const groundContext = groundCanvas.getContext('2d');
+    if (groundContext) {
+      groundContext.fillStyle = '#9aa77d';
+      groundContext.fillRect(0, 0, 512, 512);
+      let groundSeed = 813;
+      for (let i = 0; i < 6500; i++) {
+        groundSeed = (groundSeed * 16807) % 2147483647;
+        const x = (groundSeed / 2147483647) * 512;
+        groundSeed = (groundSeed * 16807) % 2147483647;
+        const y = (groundSeed / 2147483647) * 512;
+        const radius = 0.5 + (groundSeed % 15) / 10;
+        groundContext.fillStyle = i % 3 === 0 ? 'rgba(62,82,45,0.12)' : 'rgba(225,217,163,0.11)';
+        groundContext.beginPath();
+        groundContext.arc(x, y, radius, 0, Math.PI * 2);
+        groundContext.fill();
+      }
+    }
+    const groundTexture = new THREE.CanvasTexture(groundCanvas);
+    groundTexture.colorSpace = THREE.SRGBColorSpace;
+    groundTexture.wrapS = THREE.RepeatWrapping;
+    groundTexture.wrapT = THREE.RepeatWrapping;
+    groundTexture.repeat.set(18, 18);
     const groundMat = new THREE.MeshStandardMaterial({
-      color: 0xf8fafc,
+      map: groundTexture,
+      color: 0x9aa77d,
       roughness: 0.95,
-      metalness: 0.05,
+      metalness: 0,
     });
     const ground = new THREE.Mesh(groundGeom, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
 
-    // Ground Grid - clean slate lines on white ground
-    const grid = new THREE.GridHelper(50, 50, 0x94a3b8, 0xe2e8f0);
-    grid.position.y = 0.01;
+    // Faint measurement grid keeps the engineering context while letting the scene read as a site.
+    const grid = new THREE.GridHelper(50, 50, 0x71805f, 0x879473);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.12;
+    grid.position.y = 0.008;
     scene.add(grid);
 
     // Compass ring on ground
@@ -428,7 +456,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     if (solarPos.isDaylight && solarPos.altitude > 0) {
       sunLightRef.current.position.set(sunX, sunY, sunZ);
       sunLightRef.current.target.position.set(0, 1.2, 0);
-      sunLightRef.current.intensity = 3.2 * Math.sin(altRad);
+      sunLightRef.current.intensity = 2.5 * Math.sin(altRad);
       sunLightRef.current.visible = true;
 
       sunMeshRef.current.position.set(sunX, sunY, sunZ);
@@ -530,10 +558,6 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
 
     for (let r = 0; r < moduleCountY; r++) {
       for (let c = 0; c < moduleCountX; c++) {
-        const index = r * moduleCountX + c;
-        const state = moduleStates[index];
-        const isShaded = state && state.shadedRatio > 0.05;
-
         // Position on slope
         const posX = (c + 0.5) * moduleWidth - totalW / 2;
         const posZ = (r + 0.5) * moduleLength - totalL / 2;
@@ -541,25 +565,14 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         const modGroup = new THREE.Group();
         modGroup.position.set(posX, 0, posZ);
 
-        // Aluminum module frame (turns glowing amber/red when shaded for crystal-clear electrical status)
-        const frameMat = isShaded
-          ? new THREE.MeshStandardMaterial({
-              color: state.relativePower <= 0.33 ? 0xef4444 : 0xf59e0b,
-              emissive: state.relativePower <= 0.33 ? 0x991b1b : 0x78350f,
-              metalness: 0.4,
-              roughness: 0.3,
-            })
-          : normalFrameMat;
-
-        const frameMesh = new THREE.Mesh(borderGeom, frameMat);
+        // Keep module frames neutral; real shadows show the shading pattern without false colors.
+        const frameMesh = new THREE.Mesh(borderGeom, normalFrameMat);
         frameMesh.position.set(0, 0, 0);
         frameMesh.castShadow = true;
         frameMesh.receiveShadow = true;
         modGroup.add(frameMesh);
 
-        // Photovoltaic cell face: bright, high-contrast wafer texture
-        // Direct sunlight creates vibrant illumination; physical shadows cast upon it produce dark, crisp, clear silhouettes!
-        // Emissive is 0x000000 so that physical shadows are never washed out or faded!
+        // Low-gloss silicon texture provides a more familiar modern PV appearance.
         const cellMat = new THREE.MeshStandardMaterial({
           map: moduleTexture,
           color: 0xffffff,
@@ -642,7 +655,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         group.add(leg);
       });
     }
-  }, [arrayConfig, moduleStates, activeColorMode]);
+  }, [arrayConfig, activeColorMode]);
 
   // Update Obstacles in 3D Scene
   useEffect(() => {
@@ -691,24 +704,43 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         // Tree: trunk + ellipsoidal crown — identical geometry to the shading calculation
         const tg = getTreeGeometry(obs);
         const trunkH = Math.max(0.1, tg.trunkTopY);
-        const trunkGeom = new THREE.CylinderGeometry(0.2, 0.28, trunkH, 8);
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
+        const trunkGeom = new THREE.CylinderGeometry(0.14, 0.32, trunkH, 10);
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x59402e, roughness: 0.96 });
         const trunkMesh = new THREE.Mesh(trunkGeom, trunkMat);
         trunkMesh.position.y = trunkH / 2;
         trunkMesh.castShadow = true;
         trunkMesh.receiveShadow = true;
         obsGroup.add(trunkMesh);
 
-        const foliageMat = new THREE.MeshStandardMaterial({
-          color: 0x166534,
-          roughness: 0.8,
-        });
-        const crown = new THREE.Mesh(new THREE.SphereGeometry(tg.rh, 20, 16), foliageMat);
-        crown.scale.set(1, tg.rv / tg.rh, 1);
-        crown.position.y = tg.crownCenterY;
-        crown.castShadow = true;
-        crown.receiveShadow = true;
-        obsGroup.add(crown);
+        // Overlapping, varied leaf masses create an irregular canopy silhouette.
+        const leafMaterials = [0x315f32, 0x3b7138, 0x4a7d3b, 0x587f40, 0x2e542f].map(
+          (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.92 })
+        );
+        const seed = obs.id.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) || 1;
+        let randomState = seed;
+        const random = () => {
+          randomState = (randomState * 16807) % 2147483647;
+          return (randomState - 1) / 2147483646;
+        };
+        const canopy = new THREE.Group();
+        canopy.position.y = tg.crownCenterY;
+        const crownShape = new THREE.SphereGeometry(1, 12, 10);
+        for (let i = 0; i < 20; i++) {
+          const direction = new THREE.Vector3(random() * 2 - 1, random() * 2 - 1, random() * 2 - 1).normalize();
+          const size = 0.48 + random() * 0.28;
+          const leaf = new THREE.Mesh(crownShape, leafMaterials[Math.floor(random() * leafMaterials.length)]);
+          leaf.position.set(direction.x * tg.rh * 0.5, direction.y * tg.rv * 0.5, direction.z * tg.rh * 0.5);
+          leaf.scale.set(size * tg.rh, size * tg.rv, size * tg.rh);
+          leaf.castShadow = true;
+          leaf.receiveShadow = true;
+          canopy.add(leaf);
+        }
+        const core = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), leafMaterials[1]);
+        core.scale.set(tg.rh * 0.58, tg.rv * 0.58, tg.rh * 0.58);
+        core.castShadow = true;
+        core.receiveShadow = true;
+        canopy.add(core);
+        obsGroup.add(canopy);
       } else if (obs.type === 'building') {
         // Modern rectangular building block
         const bWidth = obs.width;
@@ -716,26 +748,46 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         const bDepth = obs.depth || 5;
 
         const bGeom = new THREE.BoxGeometry(bWidth, bHeight, bDepth);
-        const bMat = new THREE.MeshStandardMaterial({
-          color: 0x475569,
-          roughness: 0.7,
-          metalness: 0.2,
-        });
+        const bMat = new THREE.MeshStandardMaterial({ color: 0xb9b5a9, roughness: 0.88, metalness: 0.02 });
         const bMesh = new THREE.Mesh(bGeom, bMat);
         bMesh.position.y = bHeight / 2;
         bMesh.castShadow = true;
         bMesh.receiveShadow = true;
         obsGroup.add(bMesh);
 
-        // Windows strip
-        const winMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.1, metalness: 0.9 });
-        const winGeom = new THREE.PlaneGeometry(bWidth * 0.85, 0.4);
-        const floors = Math.floor(bHeight / 2.5);
-        for (let f = 1; f <= floors; f++) {
-          const winMesh = new THREE.Mesh(winGeom, winMat);
-          winMesh.position.set(0, f * 2.2, bDepth / 2 + 0.01);
-          obsGroup.add(winMesh);
+        // Repeated recessed windows and roof coping add believable facade scale.
+        const windowMat = new THREE.MeshStandardMaterial({ color: 0x526a70, roughness: 0.24, metalness: 0.18 });
+        const floors = Math.max(1, Math.floor(bHeight / 2.5));
+        const columns = Math.max(2, Math.floor(bWidth / 1.3));
+        const windowW = Math.min(0.72, bWidth / (columns * 1.6));
+        const windowH = Math.min(1.05, bHeight / (floors * 2.1));
+        for (let f = 0; f < floors; f++) {
+          const y = (f + 0.65) * (bHeight / floors);
+          for (let c = 0; c < columns; c++) {
+            const x = ((c + 0.5) / columns - 0.5) * bWidth;
+            const frontWindow = new THREE.Mesh(new THREE.BoxGeometry(windowW, windowH, 0.025), windowMat);
+            frontWindow.position.set(x, y, bDepth / 2 + 0.015);
+            obsGroup.add(frontWindow);
+            const sideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.025, windowH, windowW), windowMat);
+            sideWindow.position.set(bWidth / 2 + 0.015, y, (c / columns - 0.5) * bDepth * 0.72);
+            obsGroup.add(sideWindow);
+
+            const backWindow = new THREE.Mesh(new THREE.BoxGeometry(windowW, windowH, 0.025), windowMat);
+            backWindow.position.set(x, y, -bDepth / 2 - 0.015);
+            obsGroup.add(backWindow);
+
+            const oppositeSideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.025, windowH, windowW), windowMat);
+            oppositeSideWindow.position.set(-bWidth / 2 - 0.015, y, (c / columns - 0.5) * bDepth * 0.72);
+            obsGroup.add(oppositeSideWindow);
+          }
         }
+        const roof = new THREE.Mesh(
+          new THREE.BoxGeometry(bWidth + 0.15, 0.16, bDepth + 0.15),
+          new THREE.MeshStandardMaterial({ color: 0x8a877f, roughness: 0.82 })
+        );
+        roof.position.y = bHeight + 0.05;
+        roof.castShadow = true;
+        obsGroup.add(roof);
       } else if (obs.type === 'wall') {
         // Parapet / Perimeter Wall
         const wGeom = new THREE.BoxGeometry(obs.width, obs.height, 0.3);

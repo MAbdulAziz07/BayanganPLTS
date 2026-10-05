@@ -41,7 +41,7 @@ export default function App() {
   const [hour, setHour] = useState<number>(9.5); // 09:30 AM
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [sky, setSky] = useState<SkyConfig>(DEFAULT_SKY);
-  const [panelColorMode, setPanelColorMode] = useState<PanelColorMode>('high_contrast');
+  const [panelColorMode, setPanelColorMode] = useState<PanelColorMode>('classic_navy');
 
   // PV Array Configuration
   const [arrayConfig, setArrayConfig] = useState<PVArrayConfig>({
@@ -180,7 +180,7 @@ export default function App() {
       frontRowEnabled: false,
     });
     setSky(DEFAULT_SKY);
-    setPanelColorMode('high_contrast');
+    setPanelColorMode('classic_navy');
     setObstacles([
       {
         id: 'tree_1',
@@ -250,7 +250,6 @@ export default function App() {
                     arrayConfig={arrayConfig}
                     obstacles={obstacles}
                     solarPos={solarPos}
-                    moduleStates={shadingResult.modules}
                     totalShadedFraction={shadingResult.totalShadedFraction}
                     latitude={location.latitude}
                     longitude={location.longitude}
