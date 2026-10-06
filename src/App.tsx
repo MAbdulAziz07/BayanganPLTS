@@ -30,6 +30,7 @@ import { InterRowCalculator } from './components/InterRowCalculator';
 import { BypassDiodeExplanation } from './components/BypassDiodeExplanation';
 import { ScenarioPresets } from './components/ScenarioPresets';
 import { ReportModal } from './components/ReportModal';
+import { TimeBar } from './components/TimeBar';
 
 export default function App() {
   // Navigation tab
@@ -41,7 +42,7 @@ export default function App() {
   const [hour, setHour] = useState<number>(9.5); // 09:30 AM
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [sky, setSky] = useState<SkyConfig>(DEFAULT_SKY);
-  const [panelColorMode, setPanelColorMode] = useState<PanelColorMode>('classic_navy');
+  const [panelColorMode, setPanelColorMode] = useState<PanelColorMode>('sky_blue');
 
   // PV Array Configuration
   const [arrayConfig, setArrayConfig] = useState<PVArrayConfig>({
@@ -77,7 +78,7 @@ export default function App() {
       type: 'building',
       name: 'Gedung Tetangga (Barat)',
       enabled: false,
-      distance: 9.0,
+      distance: 6.5, // jarak ke dinding gedung yang menghadap PLTS
       azimuth: 260, // West afternoon
       height: 9.0,
       width: 6.0,
@@ -180,7 +181,7 @@ export default function App() {
       frontRowEnabled: false,
     });
     setSky(DEFAULT_SKY);
-    setPanelColorMode('classic_navy');
+    setPanelColorMode('sky_blue');
     setObstacles([
       {
         id: 'tree_1',
@@ -239,13 +240,14 @@ export default function App() {
               currentLossPercent={currentLossPercent}
               dailyResult={dailyResult}
               arrayConfig={arrayConfig}
+              shadedFraction={shadingResult.totalShadedFraction}
             />
 
             {/* 3D Visualizer & Side Controls Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch min-h-[520px]">
               {/* Left: 3D Stage (7 cols on large desktop) */}
               <div className="lg:col-span-8 flex flex-col gap-4">
-                <div className="flex-1 min-h-[440px]">
+                <div className="flex-1 min-h-[360px] sm:min-h-[440px]">
                   <Solar3DViewport
                     arrayConfig={arrayConfig}
                     obstacles={obstacles}
@@ -258,8 +260,38 @@ export default function App() {
                     hour={hour}
                     panelColorMode={panelColorMode}
                     onPanelColorChange={setPanelColorMode}
+                    fullscreenOverlay={
+                      <>
+                        <TimeBar
+                          hour={hour}
+                          setHour={setHour}
+                          isPlaying={isPlaying}
+                          setIsPlaying={setIsPlaying}
+                          location={location}
+                          month={month}
+                          compact
+                        />
+                        <HourlyYieldChart
+                          dailyResult={dailyResult}
+                          currentHour={hour}
+                          tzLabel={timeZoneLabel(location.timezoneOffset)}
+                          onSelectHour={(h) => setHour(h)}
+                          compact
+                        />
+                      </>
+                    }
                   />
                 </div>
+
+                {/* Time control directly under the 3D view */}
+                <TimeBar
+                  hour={hour}
+                  setHour={setHour}
+                  isPlaying={isPlaying}
+                  setIsPlaying={setIsPlaying}
+                  location={location}
+                  month={month}
+                />
 
                 {/* Daily Yield Chart under 3D Viewport */}
                 <HourlyYieldChart
@@ -320,7 +352,12 @@ export default function App() {
         )}
 
         {/* TAB 4: BYPASS DIODE & MISMATCH FISIKA */}
-        {activeTab === 'bypass_diode' && <BypassDiodeExplanation />}
+        {activeTab === 'bypass_diode' && (
+          <BypassDiodeExplanation
+            moduleWattage={arrayConfig.moduleWattage}
+            moduleCount={arrayConfig.moduleCountX * arrayConfig.moduleCountY}
+          />
+        )}
       </main>
 
       {/* Technical Report Modal */}

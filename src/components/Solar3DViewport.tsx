@@ -3,8 +3,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { PVArrayConfig, ObstacleConfig, SolarPosition, PanelColorMode } from '../types/solar';
 import { DEG2RAD, calculateSolarPosition } from '../utils/solarMath';
-import { frontRowOffset, getTreeGeometry } from '../utils/shadingMath';
-import { Compass, Eye, Sun, Maximize2, ShieldAlert, Palette, Check, ChevronDown, X } from 'lucide-react';
+import { frontRowOffset, getTreeGeometry, obstacleCenterDistance } from '../utils/shadingMath';
+import { Compass, Eye, Sun, Maximize2, Minimize2, ShieldAlert, Palette, Check, ChevronDown, X, Wind } from 'lucide-react';
+import { createRealisticTree, AnimatedTree } from './tree3d';
+import { createRealisticBuilding } from './building3d';
 
 export const PANEL_COLOR_OPTIONS: {
   id: PanelColorMode;
@@ -18,63 +20,23 @@ export const PANEL_COLOR_OPTIONS: {
 }[] = [
   {
     id: 'high_contrast',
-    label: 'Perak Kontras Tinggi (Silver-Platinum)',
-    shortLabel: 'Perak (Kontras Tinggi)',
-    badge: 'Rekomendasi Utama',
-    description: 'Permukaan perak terang; bayangan pohon & gedung tampak sangat hitam pekat dan tajam',
+    label: 'Perak (Kontras Tinggi)',
+    shortLabel: 'Perak',
+    badge: 'Bayangan paling jelas',
+    description: 'Permukaan perak terang; siluet bayangan pohon & gedung tampak hitam pekat dan tajam',
     swatchClass: 'bg-slate-200',
     borderClass: 'border-slate-400',
     dotColor: '#e2e8f0',
   },
   {
-    id: 'golden_amber',
-    label: 'Kuning Emas (High-Visibility)',
-    shortLabel: 'Kuning Emas',
-    badge: 'Kontras Ekstrem',
-    description: 'Warna kuning cerah dengan sensitivitas mata tertinggi terhadap bayangan hitam pekat',
-    swatchClass: 'bg-amber-300',
-    borderClass: 'border-amber-500',
-    dotColor: '#fde047',
-  },
-  {
-    id: 'white_testbed',
-    label: 'Putih Uji (Lab Shadow Canvas)',
-    shortLabel: 'Putih Uji',
-    badge: 'Fotometri',
-    description: 'Kanvas putih proyeksi murni tanpa bias warna, siluet bayangan 100% presisi',
-    swatchClass: 'bg-white',
-    borderClass: 'border-slate-300',
-    dotColor: '#ffffff',
-  },
-  {
-    id: 'bright_cyan',
-    label: 'Cyan Terang (Electric Ice Blue)',
-    shortLabel: 'Cyan Terang',
-    badge: 'Modern',
-    description: 'Tampilan sel surya modern cerah dengan visibilitas bayangan sangat jelas',
-    swatchClass: 'bg-sky-400',
-    borderClass: 'border-sky-600',
-    dotColor: '#38bdf8',
-  },
-  {
     id: 'sky_blue',
-    label: 'Biru Langit (Sky Blue)',
+    label: 'Biru Langit',
     shortLabel: 'Biru Langit',
-    badge: 'Estetik',
-    description: 'Biru cerah yang jauh lebih mudah melihat bayangan dibanding biru tua',
+    badge: 'Mirip modul asli',
+    description: 'Biru cerah menyerupai modul surya, bayangan tetap mudah terlihat',
     swatchClass: 'bg-blue-400',
     borderClass: 'border-blue-600',
     dotColor: '#60a5fa',
-  },
-  {
-    id: 'classic_navy',
-    label: 'Biru Safir Klasik',
-    shortLabel: 'Biru Standar',
-    badge: 'Polikristalin',
-    description: 'Warna panel surya polikristalin standar komersial konvensional',
-    swatchClass: 'bg-blue-900',
-    borderClass: 'border-blue-950',
-    dotColor: '#1e3a8a',
   },
 ];
 
@@ -99,38 +61,12 @@ function createModuleCanvasTexture(colorMode: PanelColorMode): THREE.CanvasTextu
     busbarColor = 'rgba(71, 85, 105, 0.45)';
     cellBorder = '#cbd5e1';
     dividerColor = 'rgba(51, 65, 85, 0.9)';
-  } else if (colorMode === 'golden_amber') {
-    // High-visibility gold/yellow: maximum optical contrast with black shadows
-    baseFill = '#d97706';
-    cellFill = '#fde047';
-    busbarColor = 'rgba(180, 83, 9, 0.5)';
-    cellBorder = '#facc15';
-    dividerColor = 'rgba(146, 64, 14, 0.9)';
-  } else if (colorMode === 'white_testbed') {
-    // Pure white photometric testbed
-    baseFill = '#e2e8f0';
-    cellFill = '#ffffff';
-    busbarColor = 'rgba(148, 163, 184, 0.45)';
-    cellBorder = '#f1f5f9';
-    dividerColor = 'rgba(100, 116, 139, 0.7)';
-  } else if (colorMode === 'bright_cyan') {
-    baseFill = '#0284c7';
-    cellFill = '#38bdf8';
-    busbarColor = 'rgba(255, 255, 255, 0.65)';
-    cellBorder = '#7dd3fc';
-    dividerColor = 'rgba(255, 255, 255, 0.95)';
   } else if (colorMode === 'sky_blue') {
     baseFill = '#1d4ed8';
     cellFill = '#60a5fa';
     busbarColor = 'rgba(255, 255, 255, 0.6)';
     cellBorder = '#93c5fd';
     dividerColor = 'rgba(255, 255, 255, 0.95)';
-  } else if (colorMode === 'classic_navy') {
-    baseFill = '#0f172a';
-    cellFill = '#1e3a8a';
-    busbarColor = 'rgba(255, 255, 255, 0.35)';
-    cellBorder = '#172554';
-    dividerColor = 'rgba(255, 255, 255, 0.8)';
   }
 
   // Base wafer background
@@ -206,7 +142,17 @@ interface Solar3DViewportProps {
   hour: number;
   panelColorMode?: PanelColorMode;
   onPanelColorChange?: (mode: PanelColorMode) => void;
+  /** Konten yang ditempel di atas tampilan 3D saat mode layar penuh (mis. kurva produksi harian) */
+  fullscreenOverlay?: React.ReactNode;
 }
+
+type ViewPreset = 'perspective' | 'top' | 'side' | 'sun';
+const VIEW_OPTIONS: { id: ViewPreset; label: string; hint: string }[] = [
+  { id: 'perspective', label: 'Perspektif 3D', hint: 'Sudut pandang miring standar' },
+  { id: 'top', label: 'Atas (Top)', hint: 'Melihat bayangan dari atas' },
+  { id: 'side', label: 'Samping (Tilt)', hint: 'Melihat sudut kemiringan modul' },
+  { id: 'sun', label: 'Matahari (LOS)', hint: 'Melihat dari arah datang sinar matahari' },
+];
 
 export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
   arrayConfig,
@@ -220,8 +166,40 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
   hour,
   panelColorMode,
   onPanelColorChange,
+  fullscreenOverlay,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLDivElement>(null);
+
+  // Sinkronkan state dengan Fullscreen API (termasuk saat keluar lewat tombol Esc)
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === wrapperRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await wrapperRef.current?.requestFullscreen();
+    } catch {
+      /* browser menolak fullscreen — abaikan */
+    }
+  };
+
+  // Tutup dropdown sudut pandang saat klik di luar
+  useEffect(() => {
+    if (!isViewMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) setIsViewMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [isViewMenuOpen]);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -234,10 +212,14 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
   const sunArcRef = useRef<THREE.Line | null>(null);
   const obstaclesGroupRef = useRef<THREE.Group | null>(null);
   const moduleMeshesRef = useRef<THREE.Mesh[]>([]);
+  // Pohon animasi (bergoyang tertiup angin)
+  const treesRef = useRef<AnimatedTree[]>([]);
+  const windTargetRef = useRef(1);
+  const [windOn, setWindOn] = useState(true);
 
-  const [viewPreset, setViewPreset] = useState<'perspective' | 'top' | 'side' | 'sun'>('perspective');
+  const [viewPreset, setViewPreset] = useState<ViewPreset>('perspective');
   const [showSunArc, setShowSunArc] = useState(true);
-  const [internalPanelColorMode, setInternalPanelColorMode] = useState<PanelColorMode>('classic_navy');
+  const [internalPanelColorMode, setInternalPanelColorMode] = useState<PanelColorMode>('sky_blue');
   const activeColorMode = panelColorMode ?? internalPanelColorMode;
   const [isColorMenuOpen, setIsColorMenuOpen] = useState(false);
   const colorMenuRef = useRef<HTMLDivElement>(null);
@@ -411,8 +393,15 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
 
     // Animation loop
     let animationFrameId: number;
+    const clock = new THREE.Clock();
+    let windLevel = windTargetRef.current;
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+      const t = clock.elapsedTime;
+      // Transisi halus (±1 detik) saat angin dinyalakan/dimatikan, tidak bergantung FPS
+      windLevel += (windTargetRef.current - windLevel) * (1 - Math.exp(-dt * 2.5));
+      for (const tree of treesRef.current) tree.update(t, windLevel);
       controls.update();
       renderer.render(scene, camera);
     };
@@ -428,10 +417,16 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
       renderer.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
+    // Ikuti perubahan ukuran wadah (mis. masuk/keluar layar penuh)
+    const resizeObserver = new ResizeObserver(() => handleResize());
+    resizeObserver.observe(container);
 
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
+      treesRef.current.forEach((tree) => tree.dispose());
+      treesRef.current = [];
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -510,7 +505,10 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     while (group.children.length > 0) {
       const child = group.children[0];
       group.remove(child);
-      if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
+      child.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+      });
     }
     moduleMeshesRef.current = [];
 
@@ -662,18 +660,25 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
     if (!obstaclesGroupRef.current) return;
     const group = obstaclesGroupRef.current;
 
+    treesRef.current.forEach((tree) => tree.dispose());
+    treesRef.current = [];
+
     while (group.children.length > 0) {
       const child = group.children[0];
       group.remove(child);
-      if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
+      child.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+      });
     }
 
     obstacles.forEach((obs) => {
       if (!obs.enabled) return;
 
       const azRad = obs.azimuth * DEG2RAD;
-      const posX = Math.sin(azRad) * obs.distance;
-      const posZ = Math.cos(azRad) * obs.distance;
+      const centerDist = obstacleCenterDistance(obs);
+      const posX = Math.sin(azRad) * centerDist;
+      const posZ = Math.cos(azRad) * centerDist;
 
       const baseElev = obs.baseElevation || 0;
       const obsGroup = new THREE.Group();
@@ -701,93 +706,15 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
       }
 
       if (obs.type === 'tree') {
-        // Tree: trunk + ellipsoidal crown — identical geometry to the shading calculation
-        const tg = getTreeGeometry(obs);
-        const trunkH = Math.max(0.1, tg.trunkTopY);
-        const trunkGeom = new THREE.CylinderGeometry(0.14, 0.32, trunkH, 10);
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x59402e, roughness: 0.96 });
-        const trunkMesh = new THREE.Mesh(trunkGeom, trunkMat);
-        trunkMesh.position.y = trunkH / 2;
-        trunkMesh.castShadow = true;
-        trunkMesh.receiveShadow = true;
-        obsGroup.add(trunkMesh);
-
-        // Overlapping, varied leaf masses create an irregular canopy silhouette.
-        const leafMaterials = [0x315f32, 0x3b7138, 0x4a7d3b, 0x587f40, 0x2e542f].map(
-          (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.92 })
-        );
-        const seed = obs.id.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) || 1;
-        let randomState = seed;
-        const random = () => {
-          randomState = (randomState * 16807) % 2147483647;
-          return (randomState - 1) / 2147483646;
-        };
-        const canopy = new THREE.Group();
-        canopy.position.y = tg.crownCenterY;
-        const crownShape = new THREE.SphereGeometry(1, 12, 10);
-        for (let i = 0; i < 20; i++) {
-          const direction = new THREE.Vector3(random() * 2 - 1, random() * 2 - 1, random() * 2 - 1).normalize();
-          const size = 0.48 + random() * 0.28;
-          const leaf = new THREE.Mesh(crownShape, leafMaterials[Math.floor(random() * leafMaterials.length)]);
-          leaf.position.set(direction.x * tg.rh * 0.5, direction.y * tg.rv * 0.5, direction.z * tg.rh * 0.5);
-          leaf.scale.set(size * tg.rh, size * tg.rv, size * tg.rh);
-          leaf.castShadow = true;
-          leaf.receiveShadow = true;
-          canopy.add(leaf);
-        }
-        const core = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), leafMaterials[1]);
-        core.scale.set(tg.rh * 0.58, tg.rv * 0.58, tg.rh * 0.58);
-        core.castShadow = true;
-        core.receiveShadow = true;
-        canopy.add(core);
-        obsGroup.add(canopy);
+        // Pohon realistis beranimasi angin; daun/cabang dijaga di dalam amplop elipsoid tajuk
+        // yang sama dengan perhitungan bayangan (getTreeGeometry).
+        const tree = createRealisticTree(getTreeGeometry(obs), obs.id);
+        tree.group.rotation.y = -azRad; // orientasi pohon tidak ikut berputar mengikuti azimuth
+        obsGroup.add(tree.group);
+        treesRef.current.push(tree);
       } else if (obs.type === 'building') {
-        // Modern rectangular building block
-        const bWidth = obs.width;
-        const bHeight = obs.height;
-        const bDepth = obs.depth || 5;
-
-        const bGeom = new THREE.BoxGeometry(bWidth, bHeight, bDepth);
-        const bMat = new THREE.MeshStandardMaterial({ color: 0xb9b5a9, roughness: 0.88, metalness: 0.02 });
-        const bMesh = new THREE.Mesh(bGeom, bMat);
-        bMesh.position.y = bHeight / 2;
-        bMesh.castShadow = true;
-        bMesh.receiveShadow = true;
-        obsGroup.add(bMesh);
-
-        // Repeated recessed windows and roof coping add believable facade scale.
-        const windowMat = new THREE.MeshStandardMaterial({ color: 0x526a70, roughness: 0.24, metalness: 0.18 });
-        const floors = Math.max(1, Math.floor(bHeight / 2.5));
-        const columns = Math.max(2, Math.floor(bWidth / 1.3));
-        const windowW = Math.min(0.72, bWidth / (columns * 1.6));
-        const windowH = Math.min(1.05, bHeight / (floors * 2.1));
-        for (let f = 0; f < floors; f++) {
-          const y = (f + 0.65) * (bHeight / floors);
-          for (let c = 0; c < columns; c++) {
-            const x = ((c + 0.5) / columns - 0.5) * bWidth;
-            const frontWindow = new THREE.Mesh(new THREE.BoxGeometry(windowW, windowH, 0.025), windowMat);
-            frontWindow.position.set(x, y, bDepth / 2 + 0.015);
-            obsGroup.add(frontWindow);
-            const sideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.025, windowH, windowW), windowMat);
-            sideWindow.position.set(bWidth / 2 + 0.015, y, (c / columns - 0.5) * bDepth * 0.72);
-            obsGroup.add(sideWindow);
-
-            const backWindow = new THREE.Mesh(new THREE.BoxGeometry(windowW, windowH, 0.025), windowMat);
-            backWindow.position.set(x, y, -bDepth / 2 - 0.015);
-            obsGroup.add(backWindow);
-
-            const oppositeSideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.025, windowH, windowW), windowMat);
-            oppositeSideWindow.position.set(-bWidth / 2 - 0.015, y, (c / columns - 0.5) * bDepth * 0.72);
-            obsGroup.add(oppositeSideWindow);
-          }
-        }
-        const roof = new THREE.Mesh(
-          new THREE.BoxGeometry(bWidth + 0.15, 0.16, bDepth + 0.15),
-          new THREE.MeshStandardMaterial({ color: 0x8a877f, roughness: 0.82 })
-        );
-        roof.position.y = bHeight + 0.05;
-        roof.castShadow = true;
-        obsGroup.add(roof);
+        // Gedung realistis — amplop kotak W × H × D sama dengan perhitungan bayangan
+        obsGroup.add(createRealisticBuilding(obs.width, obs.height, obs.depth || 5));
       } else if (obs.type === 'wall') {
         // Parapet / Perimeter Wall
         const wGeom = new THREE.BoxGeometry(obs.width, obs.height, 0.3);
@@ -837,7 +764,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
   }, [obstacles, arrayConfig.tilt]);
 
   // Handle Camera Presets
-  const setCameraView = (view: 'perspective' | 'top' | 'side' | 'sun') => {
+  const setCameraView = (view: ViewPreset) => {
     setViewPreset(view);
     if (!cameraRef.current || !controlsRef.current) return;
     const camera = cameraRef.current;
@@ -870,54 +797,76 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-white rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+    <div
+      ref={wrapperRef}
+      className={`relative w-full h-full bg-white overflow-hidden ${
+        isFullscreen ? 'min-h-screen rounded-none border-0' : 'min-h-[460px] rounded-xl border border-slate-200 shadow-sm'
+      }`}
+    >
       {/* 3D Canvas Mount */}
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
       {/* Viewport Floating Overlay Controls - Bright Theme */}
-      <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5 p-1 bg-white/95 backdrop-blur-md rounded-lg border border-slate-200 shadow-md text-xs z-10">
+      {/* Top overlay row: wraps onto two lines on narrow screens instead of overlapping */}
+      <div className="absolute top-3 left-3 right-3 flex flex-wrap items-start justify-between gap-2 z-20 pointer-events-none">
+      <div ref={viewMenuRef} className="pointer-events-auto relative">
         <button
-          onClick={() => setCameraView('perspective')}
-          className={`px-2.5 py-1 rounded font-medium transition-colors ${
-            viewPreset === 'perspective' ? 'bg-amber-500 text-white font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          onClick={() => setIsViewMenuOpen(!isViewMenuOpen)}
+          aria-expanded={isViewMenuOpen}
+          aria-haspopup="listbox"
+          className={`px-2.5 py-1 text-xs rounded-lg backdrop-blur-md border transition-all shadow-md flex items-center gap-1.5 ${
+            isViewMenuOpen
+              ? 'bg-amber-500 text-white border-amber-600 font-semibold'
+              : 'bg-white/95 text-slate-700 border-slate-200 hover:bg-slate-50'
           }`}
+          title="Pilih sudut pandang kamera"
         >
-          Perspektif 3D
+          <Eye className={`w-3.5 h-3.5 ${isViewMenuOpen ? 'text-white' : 'text-amber-500'}`} />
+          <span className="font-semibold">{VIEW_OPTIONS.find((v) => v.id === viewPreset)?.label}</span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${isViewMenuOpen ? 'rotate-180' : ''}`} />
         </button>
-        <button
-          onClick={() => setCameraView('top')}
-          className={`px-2.5 py-1 rounded font-medium transition-colors ${
-            viewPreset === 'top' ? 'bg-amber-500 text-white font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          Atas (Top)
-        </button>
-        <button
-          onClick={() => setCameraView('side')}
-          className={`px-2.5 py-1 rounded font-medium transition-colors ${
-            viewPreset === 'side' ? 'bg-amber-500 text-white font-semibold shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          Samping (Tilt)
-        </button>
-        <button
-          onClick={() => setCameraView('sun')}
-          disabled={!solarPos.isDaylight}
-          className={`px-2.5 py-1 rounded font-medium transition-colors ${
-            viewPreset === 'sun'
-              ? 'bg-amber-500 text-white font-semibold shadow-xs'
-              : solarPos.isDaylight
-              ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              : 'text-slate-300 cursor-not-allowed'
-          }`}
-          title="Lihat dari arah datangnya sinar matahari"
-        >
-          Matahari (LOS)
-        </button>
+        {isViewMenuOpen && (
+          <div
+            role="listbox"
+            className="absolute left-0 top-full mt-2 w-60 bg-white rounded-xl shadow-2xl border border-slate-200 p-1.5 z-30"
+          >
+            {VIEW_OPTIONS.map((v) => {
+              const disabled = v.id === 'sun' && !solarPos.isDaylight;
+              const active = viewPreset === v.id;
+              return (
+                <button
+                  key={v.id}
+                  role="option"
+                  aria-selected={active}
+                  disabled={disabled}
+                  onClick={() => {
+                    setCameraView(v.id);
+                    setIsViewMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between gap-2 ${
+                    disabled
+                      ? 'text-slate-300 cursor-not-allowed'
+                      : active
+                      ? 'bg-amber-50 text-amber-900'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>
+                    <span className="font-semibold block">{v.label}</span>
+                    <span className={`text-[10px] ${disabled ? 'text-slate-300' : 'text-slate-500'}`}>
+                      {disabled ? 'Tidak tersedia saat malam' : v.hint}
+                    </span>
+                  </span>
+                  {active && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Sun Arc & Panel Color Selector - Bright Theme (Right-anchored, does NOT obscure perspective controls on left) */}
-      <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
+      <div className="pointer-events-auto flex flex-wrap items-center gap-2 ml-auto">
         {/* Tombol & Popover Timbul Warna Panel */}
         <div ref={colorMenuRef} className="relative">
           <button
@@ -931,7 +880,7 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
             title="Klik untuk memilih warna panel surya"
           >
             <Palette className={`w-3.5 h-3.5 ${isColorMenuOpen ? 'text-white' : 'text-amber-500'}`} />
-            <span className="font-semibold">Warna Panel</span>
+            <span className="font-semibold hidden sm:inline">Warna Panel</span>
             <span
               className={`w-2.5 h-2.5 rounded-full border shadow-2xs ${
                 PANEL_COLOR_OPTIONS.find((c) => c.id === activeColorMode)?.swatchClass || 'bg-slate-200'
@@ -1011,12 +960,28 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
 
               <div className="mt-2.5 pt-2 border-t border-slate-100 px-1">
                 <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-1 rounded block leading-tight border border-amber-200/60">
-                  💡 <b>Rekomendasi:</b> Pilih <b>Perak</b> atau <b>Kuning Emas</b> untuk kontras bayangan paling hitam & pekat.
-                </span>
+                  💡 Pilih <b>Perak</b> bila ingin siluet bayangan paling kontras. </span>
               </div>
             </div>
           )}
         </div>
+
+        <button
+          onClick={() => {
+            const next = !windOn;
+            setWindOn(next);
+            windTargetRef.current = next ? 1 : 0;
+          }}
+          className={`px-2.5 py-1 text-xs rounded-lg backdrop-blur-md border transition-colors shadow-md flex items-center gap-1 ${
+            windOn
+              ? 'bg-emerald-600 text-white border-emerald-700 font-medium'
+              : 'bg-white/95 text-slate-600 border-slate-200 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+          title="Animasi pohon bergoyang tertiup angin (visual saja, tidak mengubah perhitungan bayangan)"
+        >
+          <Wind className="w-3.5 h-3.5" />
+          Angin {windOn ? 'ON' : 'OFF'}
+        </button>
 
         <button
           onClick={() => setShowSunArc(!showSunArc)}
@@ -1028,7 +993,37 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         >
           Lintasan {showSunArc ? 'ON' : 'OFF'}
         </button>
+
+        <button
+          onClick={toggleFullscreen}
+          className="hidden lg:flex px-2.5 py-1 text-xs rounded-lg backdrop-blur-md border transition-colors shadow-md items-center gap-1 bg-white/95 text-slate-700 border-slate-200 hover:text-slate-900 hover:bg-slate-50"
+          title={isFullscreen ? 'Keluar layar penuh (Esc)' : 'Tampilkan simulasi 3D layar penuh'}
+          aria-label={isFullscreen ? 'Keluar layar penuh' : 'Layar penuh'}
+        >
+          {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          <span className="font-semibold">{isFullscreen ? 'Keluar' : 'Layar Penuh'}</span>
+        </button>
       </div>
+      </div>
+
+      {/* Overlay kurva produksi harian — hanya saat layar penuh */}
+      {isFullscreen && fullscreenOverlay && (
+        <div className="absolute right-3 bottom-[68px] z-20 w-[min(680px,52vw)]">
+          <div className="flex justify-end mb-1.5">
+            <button
+              onClick={() => setShowOverlay(!showOverlay)}
+              className="px-2.5 py-1 text-xs rounded-lg bg-white/95 border border-slate-200 shadow-md text-slate-700 hover:bg-slate-50 font-semibold"
+            >
+              {showOverlay ? 'Sembunyikan Grafik' : 'Tampilkan Kurva Produksi'}
+            </button>
+          </div>
+          {showOverlay && (
+            <div className="max-h-[calc(100vh-170px)] overflow-y-auto rounded-xl shadow-2xl [&>*]:bg-white/95 [&>*]:backdrop-blur-md space-y-2">
+              {fullscreenOverlay}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Live Sun State & Shading HUD Bar at Bottom - Bright Theme */}
       <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-3 p-2.5 bg-white/95 backdrop-blur-md rounded-lg border border-slate-200 shadow-md text-xs">
@@ -1048,11 +1043,11 @@ export const Solar3DViewport: React.FC<Solar3DViewportProps> = ({
         </div>
 
         {/* Shading Status */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" title="Persentase luas permukaan modul yang tertutup bayangan. Rugi daya bisa lebih besar karena efek mismatch pada rangkaian seri.">
           {totalShadedFraction > 0.01 ? (
             <div className="flex items-center gap-1.5 text-rose-700 font-semibold bg-rose-50 px-2.5 py-0.5 rounded border border-rose-200">
               <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-              <span>Array Terbayang: {(totalShadedFraction * 100).toFixed(0)}%</span>
+              <span>Luas Terbayang: {(totalShadedFraction * 100).toFixed(0)}%</span>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-emerald-700 font-medium bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-200">
@@ -1090,6 +1085,41 @@ function createCompassRing(): THREE.Group {
   arrow.rotation.x = Math.PI / 2;
   arrow.position.set(0, 0.02, 8.5);
   group.add(arrow);
+
+  // Cardinal labels (U/T/S/B) — azimuth convention: x = sin(az), z = cos(az)
+  const labels: { t: string; az: number; color: string }[] = [
+    { t: 'U', az: 0, color: '#dc2626' },
+    { t: 'T', az: 90, color: '#334155' },
+    { t: 'S', az: 180, color: '#334155' },
+    { t: 'B', az: 270, color: '#334155' },
+  ];
+  labels.forEach(({ t, az, color }) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.beginPath();
+    ctx.arc(64, 64, 56, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.font = 'bold 72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(t, 64, 70);
+    const tex = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
+    const r = 9.6;
+    const a = (az * Math.PI) / 180;
+    sprite.position.set(Math.sin(a) * r, 0.6, Math.cos(a) * r);
+    sprite.scale.set(0.045, 0.045, 1); // ukuran tetap di layar (tidak membesar saat kamera dekat)
+    sprite.renderOrder = 10;
+    group.add(sprite);
+  });
 
   return group;
 }

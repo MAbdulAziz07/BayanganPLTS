@@ -9,6 +9,8 @@ interface MetricsCardsProps {
   currentLossPercent: number;
   dailyResult: DailySimulationResult;
   arrayConfig: PVArrayConfig;
+  /** Fraksi luas permukaan array yang tertutup bayangan (0–1) */
+  shadedFraction?: number;
 }
 
 export const MetricsCards: React.FC<MetricsCardsProps> = ({
@@ -18,6 +20,7 @@ export const MetricsCards: React.FC<MetricsCardsProps> = ({
   currentLossPercent,
   dailyResult,
   arrayConfig,
+  shadedFraction = 0,
 }) => {
   const totalCapacityKWp = (arrayConfig.moduleCountX * arrayConfig.moduleCountY * arrayConfig.moduleWattage) / 1000;
 
@@ -65,13 +68,23 @@ export const MetricsCards: React.FC<MetricsCardsProps> = ({
       <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm">
         <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
           <span className="font-medium">Rugi Bayangan Sesaat</span>
-          <TrendingDown className={`w-4 h-4 ${currentLossPercent > 5 ? 'text-rose-500' : 'text-emerald-500'}`} />
+          <TrendingDown className={`w-4 h-4 ${currentLossPercent > 5 ? 'text-rose-500' : currentLossPercent > 0.05 ? 'text-amber-500' : 'text-emerald-500'}`} />
         </div>
         <div className="flex items-baseline gap-1.5">
-          <span className={`text-xl font-bold font-mono tabular-nums ${currentLossPercent > 5 ? 'text-rose-600' : 'text-emerald-600'}`}>
-            {currentLossPercent > 0 ? `-${currentLossPercent.toFixed(1)}%` : '0.0%'}
+          <span className={`text-xl font-bold font-mono tabular-nums ${currentLossPercent > 5 ? 'text-rose-600' : currentLossPercent > 0.05 ? 'text-amber-600' : 'text-emerald-600'}`}>
+            {currentLossPercent.toFixed(1)}%
           </span>
+          <span className="text-xs text-slate-500 font-medium">dari daya ideal</span>
         </div>
+        {shadedFraction > 0.01 && currentLossPercent > 0.05 && (
+          <p
+            className="mt-1 text-[11px] text-slate-600 leading-snug"
+            title="Modul dirangkai seri: sel yang terbayang membatasi arus seluruh rangkaian, sehingga rugi daya bisa lebih besar daripada luas bayangan."
+          >
+            Luas terbayang {(shadedFraction * 100).toFixed(0)}% → rugi daya {currentLossPercent.toFixed(0)}%
+            {currentLossPercent > shadedFraction * 100 + 1 ? ' (efek mismatch seri)' : ''}
+          </p>
+        )}
         <div className="mt-1 text-[11px] text-slate-500 font-mono">
           <span>Rugi Harian: {dailyResult.overallShadingLossPercent.toFixed(1)}%</span>
           <span className="mx-1 text-slate-300">·</span>

@@ -1,14 +1,27 @@
 import React, { useState } from 'react';
 import { Zap } from 'lucide-react';
 
-export const BypassDiodeExplanation: React.FC = () => {
+interface BypassDiodeExplanationProps {
+  /** Daya modul (Wp) dari konfigurasi array utama, agar konsisten antar-tab */
+  moduleWattage?: number;
+  /** Jumlah modul seri dalam satu string (dari konfigurasi array utama) */
+  moduleCount?: number;
+}
+
+export const BypassDiodeExplanation: React.FC<BypassDiodeExplanationProps> = ({
+  moduleWattage = 550,
+  moduleCount = 8,
+}) => {
   // State of shading for each of the 3 sub-strings in a standard PV module
   const [subShaded, setSubShaded] = useState<[boolean, boolean, boolean]>([false, true, false]);
   const [inverterType, setInverterType] = useState<'string' | 'optimizer' | 'microinverter'>('string');
 
   const unshadedVoc = 48.0; // V
   const unshadedVmp = 40.0; // V
-  const unshadedImp = 13.5; // A
+  const unshadedImp = moduleWattage / unshadedVmp; // A (mis. 550 Wp / 40 V = 13,75 A)
+  const nModules = Math.max(1, moduleCount);
+  const otherCount = nModules - 1;
+  const idealStringPower = Math.round(nModules * moduleWattage);
 
   const activeSubCount = subShaded.filter((s) => !s).length;
 
@@ -17,30 +30,29 @@ export const BypassDiodeExplanation: React.FC = () => {
   // Module current: if all 3 bypassed, only diffuse residual ~1.2A
   const actualImp = activeSubCount > 0 ? unshadedImp : 1.2;
   const actualModulePower = Math.round(actualVmp * actualImp);
-  const idealModulePower = Math.round(unshadedVmp * unshadedImp); // 540W
+  const idealModulePower = Math.round(moduleWattage);
 
-  // String of 8 modules impact:
-  // Assume 7 other modules in series are 100% in full sun (540W each)
-  const otherModulesPower = 7 * idealModulePower;
+  // Dampak pada string: modul lain dianggap tersinari penuh
+  const otherModulesPower = otherCount * idealModulePower;
   let totalStringPower = 0;
   let stringLossPercent = 0;
 
   if (inverterType === 'string') {
     // Traditional string: if bypass diode conducts, string voltage drops by the bypassed voltage,
     // maintaining full string current (unshadedImp).
-    // Total string voltage = 7 * 40V + actualVmp.
-    const totalV = 7 * unshadedVmp + actualVmp;
+    // Tegangan string total = (n-1) × Vmp + Vmp modul terbayang
+    const totalV = otherCount * unshadedVmp + actualVmp;
     totalStringPower = Math.round(totalV * unshadedImp);
     // If MPPT gets confused by multiple local peaks (common in cheaper inverters), mismatch loss rises
-    stringLossPercent = Math.round(((8 * idealModulePower - totalStringPower) / (8 * idealModulePower)) * 100);
+    stringLossPercent = Math.round(((idealStringPower - totalStringPower) / idealStringPower) * 100);
   } else if (inverterType === 'optimizer') {
     // Optimizer: module DC/DC converts power directly, no string current bottleneck
     totalStringPower = Math.round(otherModulesPower + actualModulePower * 0.98);
-    stringLossPercent = Math.round(((8 * idealModulePower - totalStringPower) / (8 * idealModulePower)) * 100);
+    stringLossPercent = Math.round(((idealStringPower - totalStringPower) / idealStringPower) * 100);
   } else {
     // Microinverter: completely independent AC output
     totalStringPower = otherModulesPower + actualModulePower;
-    stringLossPercent = Math.round(((8 * idealModulePower - totalStringPower) / (8 * idealModulePower)) * 100);
+    stringLossPercent = Math.round(((idealStringPower - totalStringPower) / idealStringPower) * 100);
   }
 
   const toggleSub = (index: 0 | 1 | 2) => {
@@ -177,7 +189,7 @@ export const BypassDiodeExplanation: React.FC = () => {
       <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="font-semibold text-slate-800">
-            Dampak pada Rangkaian String (1 String = 8 Modul × 540W = 4.32 kWp)
+            Dampak pada Rangkaian String (1 String = {nModules} Modul × {moduleWattage} Wp = {(idealStringPower / 1000).toLocaleString('id-ID', { maximumFractionDigits: 2 })} kWp)
           </span>
 
           {/* Inverter Type Switch */}
@@ -219,18 +231,26 @@ export const BypassDiodeExplanation: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
           <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-2xs">
             <span className="text-[11px] text-slate-500 block mb-0.5 font-medium">Daya String Ideal</span>
-            <span className="font-mono text-base font-bold text-slate-900">4,320 W</span>
+            <span className="font-mono text-base font-bold text-slate-900">{idealStringPower.toLocaleString('id-ID')} W</span>
           </div>
 
           <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-2xs">
             <span className="text-[11px] text-slate-500 block mb-0.5 font-medium">Daya String Aktual</span>
-            <span className="font-mono text-base font-bold text-sky-700">{totalStringPower} W</span>
+            <span className="font-mono text-base font-bold text-sky-700">{totalStringPower.toLocaleString('id-ID')} W</span>
           </div>
 
           <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-2xs">
             <span className="text-[11px] text-slate-500 block mb-0.5 font-medium">Penurunan Daya Total</span>
-            <span className={`font-mono text-base font-bold ${stringLossPercent > 5 ? 'text-rose-600' : 'text-emerald-600'}`}>
-              -{stringLossPercent}% ({4320 - totalStringPower} W)
+            <span
+              className={`font-mono text-base font-bold ${
+                idealStringPower - totalStringPower <= 0
+                  ? 'text-emerald-600'
+                  : stringLossPercent > 5
+                  ? 'text-rose-600'
+                  : 'text-amber-600'
+              }`}
+            >
+              {stringLossPercent}% ({(idealStringPower - totalStringPower).toLocaleString('id-ID')} W)
             </span>
           </div>
         </div>

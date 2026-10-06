@@ -140,10 +140,10 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
   return (
     <div className="bg-white border border-slate-200 rounded-xl flex flex-col h-full overflow-hidden shadow-sm">
       {/* Top Segmented Tabs for Controls - Bright Theme */}
-      <div className="flex items-center p-1.5 bg-slate-50 border-b border-slate-200 gap-1 text-xs font-medium overflow-x-auto">
+      <div className="grid grid-cols-2 p-1.5 bg-slate-50 border-b border-slate-200 gap-1 text-xs font-medium">
         <button
           onClick={() => setActiveSection('time_loc')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors justify-center ${
             activeSection === 'time_loc'
               ? 'bg-white text-amber-600 font-semibold shadow-xs border border-slate-200'
               : 'text-slate-600 hover:text-slate-900'
@@ -154,29 +154,29 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
         </button>
         <button
           onClick={() => setActiveSection('slope_array')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors justify-center ${
             activeSection === 'slope_array'
               ? 'bg-white text-amber-600 font-semibold shadow-xs border border-slate-200'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <Layers className="w-3.5 h-3.5 text-amber-500" />
-          <span>Slope & Dudukan PLTS</span>
+          <span>Slope & Dudukan</span>
         </button>
         <button
           onClick={() => setActiveSection('obstacles')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors justify-center ${
             activeSection === 'obstacles'
               ? 'bg-white text-amber-600 font-semibold shadow-xs border border-slate-200'
               : 'text-slate-600 hover:text-slate-900'
           }`}
         >
           <Trees className="w-3.5 h-3.5 text-amber-500" />
-          <span>Rintangan Bayangan ({obstacles.filter((o) => o.enabled).length})</span>
+          <span>Rintangan ({obstacles.filter((o) => o.enabled).length} aktif)</span>
         </button>
         <button
           onClick={() => setActiveSection('electrical')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors justify-center ${
             activeSection === 'electrical'
               ? 'bg-white text-amber-600 font-semibold shadow-xs border border-slate-200'
               : 'text-slate-600 hover:text-slate-900'
@@ -208,6 +208,9 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
                 onChange={(e) => handleCityChange(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:border-amber-500 focus:bg-white"
               >
+                {!CITIES_INDONESIA.some((c) => c.name === location.name) && (
+                  <option value={location.name}>{location.name} — lokasi kustom</option>
+                )}
                 {CITIES_INDONESIA.map((city) => (
                   <option key={city.name} value={city.name}>
                     {city.name} ({city.latitude > 0 ? `${city.latitude}° N` : `${Math.abs(city.latitude)}° S`})
@@ -244,6 +247,10 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
                 <span>0° (Khatulistiwa)</span>
                 <span>15° N (Utara)</span>
               </div>
+              <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
+                Pilih kota untuk data lengkap (lintang, bujur, zona waktu). Menggeser slider ini hanya mengubah
+                lintang dan menjadikan lokasi <b>Kustom</b>; bujur & zona waktu tetap dari kota terakhir.
+              </p>
             </div>
 
             {/* Bulan dalam Setahun */}
@@ -331,72 +338,9 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
               )}
             </div>
 
-            {/* Jam & Playback Animasi Matahari */}
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                  <Sun className="w-3.5 h-3.5 text-amber-500" />
-                  Waktu Simulasi
-                </span>
-                <span className="font-mono text-base font-bold text-amber-600 tabular-nums">
-                  {formatHour(hour)} {tzLabel}
-                </span>
-              </div>
-
-              <input
-                type="range"
-                min="5"
-                max="19"
-                step="0.1"
-                value={hour}
-                onChange={(e) => setHour(parseFloat(e.target.value))}
-                className="w-full accent-amber-500 cursor-pointer"
-              />
-
-              <div className="flex items-center justify-between mt-2.5">
-                <button
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium text-xs transition-colors shadow-xs ${
-                    isPlaying
-                      ? 'bg-rose-50 text-rose-700 border border-rose-300 hover:bg-rose-100'
-                      : 'bg-amber-500 text-white font-semibold hover:bg-amber-600'
-                  }`}
-                >
-                  {isPlaying ? (
-                    <>
-                      <Pause className="w-3.5 h-3.5" />
-                      <span>Jeda Animasi</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-3.5 h-3.5" />
-                      <span>Putar Lintasan Matahari</span>
-                    </>
-                  )}
-                </button>
-
-                <div className="flex items-center gap-1">
-                  {[7, 9, 12, 15, 17].map((h) => (
-                    <button
-                      key={h}
-                      onClick={() => setHour(h)}
-                      className={`px-2 py-1 rounded text-[11px] font-mono transition-colors ${
-                        Math.abs(hour - h) < 0.3
-                          ? 'bg-amber-500 text-white font-bold'
-                          : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                      }`}
-                    >
-                      {h}:00
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-2">
-                Jam dalam waktu lokal ({tzLabel}). Matahari tertinggi (tengah hari surya) pada{' '}
-                <b className="font-mono text-slate-700">{formatHour(noonClock)} {tzLabel}</b> — bergeser karena bujur lokasi
-                ({location.longitude.toFixed(1)}° BT) dan equation of time.
-              </p>
-            </div>
+            <p className="text-[11px] text-slate-500 px-1">
+              Pengaturan <b>jam simulasi</b> dan tombol <b>Putar Matahari</b> ada tepat di bawah tampilan 3D.
+            </p>
 
             {/* Rekomendasi Sudut Berdasarkan Lokasi */}
             <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200 text-amber-900 text-[11px] leading-relaxed">
@@ -723,7 +667,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
               </div>
 
               <p className="text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200">
-                💡 <b>Rekomendasi:</b> Gunakan warna <b>Perak (Kontras Tinggi)</b> atau <b>Kuning Emas</b> agar siluet bayangan pohon, gedung sekitar, atau baris depan terlihat sangat tajam dan tidak tertutup warna biru tua gelap.
+                💡 <b>Rekomendasi:</b> Gunakan <b>Perak</b> agar siluet bayangan pohon, gedung, atau baris depan terlihat paling tajam. <b>Biru Langit</b> lebih mirip modul asli.
               </p>
             </div>
 
@@ -861,7 +805,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
                         {/* Jarak */}
                         <div>
                           <div className="flex justify-between text-slate-600 mb-0.5">
-                            <span>Jarak Horizontal ke Array:</span>
+                            <span>{obs.type === 'building' ? 'Jarak Array ke Dinding Gedung:' : 'Jarak Horizontal ke Array:'}</span>
                             <span className="font-mono text-slate-800 font-semibold">{obs.distance} meter</span>
                           </div>
                           <input
@@ -973,24 +917,93 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
                           </div>
                         </div>
 
-                        {/* Dimensi Lebar */}
-                        <div>
-                          <div className="flex justify-between text-slate-600 mb-0.5">
-                            <span>Lebar Rintangan:</span>
-                            <span className="font-mono text-slate-800 font-semibold">{obs.width} m</span>
+                        {/* Dimensi Lebar / Panjang */}
+                        {obs.type === 'building' ? (
+                          <div className="p-2 bg-white rounded-lg border border-slate-200 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-slate-700">Ukuran Gedung</span>
+                              <span className="font-mono text-[10px] text-slate-500">
+                                {obs.width} × {obs.depth || 5} × {obs.height} m
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {[
+                                { label: 'Rumah 1 lt', w: 8, d: 10, h: 4.5 },
+                                { label: 'Ruko 2 lt', w: 4.5, d: 15, h: 8 },
+                                { label: 'Ruko 3 lt', w: 5, d: 15, h: 11.5 },
+                                { label: 'Kantor 4 lt', w: 16, d: 12, h: 15 },
+                              ].map((pr) => {
+                                const active = obs.width === pr.w && (obs.depth || 5) === pr.d && obs.height === pr.h;
+                                return (
+                                  <button
+                                    key={pr.label}
+                                    onClick={() => updateObstacle(obs.id, { width: pr.w, depth: pr.d, height: pr.h })}
+                                    className={`px-2 py-0.5 rounded border text-[10px] transition-colors ${
+                                      active
+                                        ? 'bg-amber-500 border-amber-500 text-white font-semibold'
+                                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                    title={`${pr.w} m × ${pr.d} m, tinggi ${pr.h} m`}
+                                  >
+                                    {pr.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-slate-600 mb-0.5">
+                                <span>Lebar (sisi menghadap PLTS):</span>
+                                <span className="font-mono text-slate-800 font-semibold">{obs.width} m</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="2"
+                                max="30"
+                                step="0.5"
+                                value={obs.width}
+                                onChange={(e) => updateObstacle(obs.id, { width: parseFloat(e.target.value) })}
+                                className="w-full accent-amber-500 cursor-pointer"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-slate-600 mb-0.5">
+                                <span>Panjang (menjauhi PLTS):</span>
+                                <span className="font-mono text-slate-800 font-semibold">{obs.depth || 5} m</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="2"
+                                max="30"
+                                step="0.5"
+                                value={obs.depth || 5}
+                                onChange={(e) => updateObstacle(obs.id, { depth: parseFloat(e.target.value) })}
+                                className="w-full accent-amber-500 cursor-pointer"
+                              />
+                            </div>
+                            <p className="text-[10px] text-slate-500 leading-snug">
+                              Lebar menentukan seberapa lebar bayangan menyapu array; panjang berpengaruh saat matahari
+                              rendah dari samping gedung. Bayangan dan angka rugi langsung dihitung ulang.
+                            </p>
                           </div>
-                          <input
-                            type="range"
-                            min="0.5"
-                            max="20"
-                            step="0.5"
-                            value={obs.width}
-                            onChange={(e) =>
-                              updateObstacle(obs.id, { width: parseFloat(e.target.value) })
-                            }
-                            className="w-full accent-amber-500 cursor-pointer"
-                          />
-                        </div>
+                        ) : (
+                          <div>
+                            <div className="flex justify-between text-slate-600 mb-0.5">
+                              <span>Lebar Rintangan:</span>
+                              <span className="font-mono text-slate-800 font-semibold">{obs.width} m</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.5"
+                              max="20"
+                              step="0.5"
+                              value={obs.width}
+                              onChange={(e) =>
+                                updateObstacle(obs.id, { width: parseFloat(e.target.value) })
+                              }
+                              className="w-full accent-amber-500 cursor-pointer"
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

@@ -26,6 +26,15 @@ function sunVector(sunAltDeg: number, sunAzDeg: number): Vec3 {
  * HIGH edge points away from it (rotation by azimuth + 180°). The 3D viewport uses the same
  * convention (rotation order YXZ).
  */
+/**
+ * Jarak dari pusat array ke TITIK TENGAH rintangan.
+ * Untuk gedung, `distance` diartikan sebagai jarak ke DINDING yang menghadap PLTS,
+ * sehingga mengubah panjang (depth) gedung tidak menggeser dindingnya mendekati panel.
+ */
+export function obstacleCenterDistance(o: ObstacleConfig): number {
+  return o.type === 'building' ? o.distance + (o.depth || 5) / 2 : o.distance;
+}
+
 export function arrayLocalToWorld(u: number, s: number, cfg: PVArrayConfig, offset: Vec3 = [0, 0, 0]): Vec3 {
   const tiltRad = cfg.tilt * DEG2RAD;
   const phi = (cfg.azimuth + 180) * DEG2RAD;
@@ -91,8 +100,9 @@ export function isPointShadedByObstacle(
 
   // Obstacle position relative to array center (0,0)
   const obsAzRad = obstacle.azimuth * DEG2RAD;
-  const obsCenterX = Math.sin(obsAzRad) * obstacle.distance;
-  const obsCenterZ = Math.cos(obsAzRad) * obstacle.distance;
+  const centerDist = obstacleCenterDistance(obstacle);
+  const obsCenterX = Math.sin(obsAzRad) * centerDist;
+  const obsCenterZ = Math.cos(obsAzRad) * centerDist;
   const baseElev = obstacle.baseElevation || 0;
   const topY = baseElev + obstacle.height;
 

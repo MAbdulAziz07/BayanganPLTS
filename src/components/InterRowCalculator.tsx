@@ -18,7 +18,14 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
   );
   const [tilt, setTilt] = useState<number>(arrayConfig.tilt ?? 15);
   const [criticalSunAlt, setCriticalSunAlt] = useState<number>(25); // degrees
-  const [pitchState, setActualPitch] = useState<number>(arrayConfig.rowSpacing || 3.0); // meters
+  // Nilai awal: jika baris depan sudah diaktifkan di simulasi 3D, pakai jarak tersebut;
+  // jika belum, mulai dari pitch minimum aman (kondisi "Aman") agar tidak langsung tampil gagal.
+  const [pitchState, setActualPitch] = useState<number>(() => {
+    if (arrayConfig.frontRowEnabled && arrayConfig.rowSpacing) return arrayConfig.rowSpacing;
+    const L = Math.round(arrayConfig.moduleCountY * arrayConfig.moduleLength * 100) / 100 || 2.27;
+    const safe = calculateInterRowPitch(L, arrayConfig.tilt ?? 15, 25).minRowPitch;
+    return Math.ceil(safe * 20) / 20;
+  }); // meters
   // Rows cannot overlap: pitch must exceed the horizontal projection of the table
   const minPhysicalPitch = Math.ceil((moduleLength * Math.cos((tilt * Math.PI) / 180) + 0.05) * 20) / 20;
   const actualPitch = Math.max(pitchState, minPhysicalPitch);
@@ -27,8 +34,8 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
   const isShading = actualPitch < result.minRowPitch;
 
   // SVG parameters for 2D schematic
-  const svgWidth = 620;
-  const svgHeight = 220;
+  const svgWidth = 600;
+  const svgHeight = 230;
   // pixels per meter — shrink automatically so long tables / wide pitches stay inside the drawing
   const drawLengthM =
     Math.max(actualPitch, 0) +
@@ -68,7 +75,7 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
 
       {/* Interactive 2D Cross-Section SVG Diagram - Clean White Canvas */}
       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 relative">
-        <div className="flex items-center justify-between text-xs mb-2">
+        <div className="flex flex-wrap gap-2 items-center justify-between text-xs mb-2">
           <span className="font-semibold text-slate-800">
             Penampang Samping 2D (Cross-Section View)
           </span>
@@ -87,7 +94,7 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
           </div>
         </div>
 
-        <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-44 select-none bg-white rounded-lg border border-slate-200">
+        <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-auto max-h-64 select-none bg-white rounded-lg border border-slate-200">
           {/* Ground line */}
           <line x1={20} y1={groundY} x2={svgWidth - 20} y2={groundY} stroke="#94a3b8" strokeWidth={2} />
 
@@ -120,7 +127,7 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
           />
           {/* Row 1 Support strut */}
           <line x1={row1EndX} y1={row1TopY} x2={row1EndX} y2={groundY} stroke="#64748b" strokeWidth={2} />
-          <text x={row1StartX} y={groundY + 16} className="fill-slate-600 text-[10px] font-mono">
+          <text x={row1StartX} y={groundY + 16} className="fill-slate-600 text-[12px] font-mono">
             Baris 1 (Depan)
           </text>
 
@@ -136,7 +143,7 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
           />
           {/* Row 2 Support strut */}
           <line x1={row2EndX} y1={row2TopY} x2={row2EndX} y2={groundY} stroke="#64748b" strokeWidth={2} />
-          <text x={row2StartX} y={groundY + 16} className="fill-slate-600 text-[10px] font-mono">
+          <text x={row2StartX} y={groundY + 16} className="fill-slate-600 text-[12px] font-mono">
             Baris 2 (Belakang)
           </text>
 
@@ -147,9 +154,9 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
             <circle cx={row2StartX} cy={groundY + 28} r={2.5} fill="#d97706" />
             <text
               x={(row1StartX + row2StartX) / 2}
-              y={groundY + 42}
+              y={groundY + 46}
               textAnchor="middle"
-              className="fill-amber-700 font-mono text-[11px] font-bold"
+              className="fill-amber-700 font-mono text-[13px] font-bold"
             >
               Jarak Pitch: {actualPitch.toFixed(2)} m
             </text>
@@ -158,7 +165,7 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
           {/* Height Dimension H */}
           <g>
             <line x1={row1EndX + 8} y1={groundY} x2={row1EndX + 8} y2={row1TopY} stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 2" />
-            <text x={row1EndX + 12} y={(groundY + row1TopY) / 2 + 4} className="fill-slate-500 font-mono text-[9px]">
+            <text x={row1EndX + 12} y={(groundY + row1TopY) / 2 + 4} className="fill-slate-500 font-mono text-[12px]">
               H={result.verticalHeight.toFixed(2)}m
             </text>
           </g>
@@ -170,8 +177,8 @@ export const InterRowCalculator: React.FC<InterRowCalculatorProps> = ({
             stroke="#0284c7"
             strokeWidth={1.5}
           />
-          <text x={row1StartX + 32} y={groundY - 8} className="fill-sky-700 font-mono text-[10px] font-semibold">
-            {tilt}°
+          <text x={row1StartX - 8} y={groundY - 4} textAnchor="end" className="fill-sky-700 font-mono text-[12px] font-semibold">
+            β={tilt}°
           </text>
         </svg>
       </div>

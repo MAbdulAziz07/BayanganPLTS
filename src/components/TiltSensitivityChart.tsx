@@ -61,6 +61,19 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
     }));
   }, [location.latitude, selectedAzimuth, sky]);
 
+  // Optimum presisi (langkah 1°) dengan model yang sama, agar kartu & grafik konsisten
+  const fineOptimum = useMemo(() => {
+    let best = { tilt: 0, kwh: -1 };
+    for (let t = 0; t <= 45; t += 1) {
+      let annualKWh = 0;
+      for (let m = 1; m <= 12; m++) {
+        annualKWh += unshadedDailyKWhPerKWp(location.latitude, m, t, selectedAzimuth, sky) * DAYS_IN_MONTH[m - 1];
+      }
+      if (annualKWh > best.kwh) best = { tilt: t, kwh: annualKWh };
+    }
+    return best;
+  }, [location.latitude, selectedAzimuth, sky]);
+
   // Find optimal tilt in current simulation
   const optimalItem = [...tiltData].sort((a, b) => b.annualYieldKWhPerKWp - a.annualYieldKWhPerKWp)[0];
 
@@ -78,11 +91,11 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
         </div>
 
         {/* Azimuth Selector for Comparison */}
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-slate-600 flex items-center gap-1 font-medium">
             <Compass className="w-3.5 h-3.5 text-amber-500" /> Orientasi Hadap:
           </span>
-          <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
+          <div className="flex flex-wrap items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
             {[
               { label: 'Utara (0°)', az: 0 },
               { label: 'Timur (90°)', az: 90 },
@@ -108,12 +121,13 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
       {/* Engineering Recommendation Box */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-          <span className="text-xs text-slate-500 block mb-1 font-medium">Optimum Matematis</span>
+          <span className="text-xs text-slate-500 block mb-1 font-medium">Optimum Hasil Simulasi</span>
           <div className="text-2xl font-bold font-mono text-slate-900">
-            {rec.mathematicalOptimal}°
+            {fineOptimum.tilt}°
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            Berdasarkan garis lintang murni ({Math.abs(location.latitude).toFixed(1)}°).
+            Dihitung per 1° untuk arah hadap terpilih (sudah termasuk rugi debu). Aturan praktis ≈ lintang:{' '}
+            <b className="font-mono">{rec.mathematicalOptimal}°</b>.
           </p>
         </div>
 
@@ -143,7 +157,7 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
 
       {/* Visual Bar Chart: Tilt vs Energy Yield */}
       <div>
-        <div className="flex justify-between items-center mb-2 text-xs">
+        <div className="flex flex-wrap gap-1 justify-between items-center mb-2 text-xs">
           <span className="font-semibold text-slate-800">
             Grafik Sensitivitas Produksi Energi Tahunan vs Sudut Kemiringan
           </span>
@@ -160,7 +174,7 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
             return (
               <div key={item.tilt} className="flex items-center gap-3 text-xs">
                 {/* Tilt Label */}
-                <div className="w-14 font-mono font-semibold text-slate-800 text-right">
+                <div className="w-9 sm:w-14 font-mono font-semibold text-slate-800 text-right">
                   {item.tilt}°
                 </div>
 
@@ -183,7 +197,7 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
                 </div>
 
                 {/* Risk / Status Badge */}
-                <div className="w-40 text-right text-[11px]">
+                <div className="hidden sm:block w-40 text-right text-[11px]">
                   {item.tilt < 10 ? (
                     <span className="text-rose-600 font-medium">⚠️ Risiko Genangan Air</span>
                   ) : isOptimal ? (
@@ -208,6 +222,11 @@ export const TiltSensitivityChart: React.FC<TiltSensitivityChartProps> = ({
             );
           })}
         </div>
+        <p className="text-[11px] text-slate-500 mt-2">
+          Grafik ditampilkan per 5°, sehingga ★ Puncak Energi menandai kelipatan 5° terdekat. Optimum presisi hasil
+          perhitungan per 1° adalah <b className="font-mono text-slate-700">{fineOptimum.tilt}°</b>; selisih produksi antar
+          sudut di sekitar puncak biasanya &lt; 1%.
+        </p>
       </div>
 
       {/* Explanation of Why Tilt Angle Matters */}

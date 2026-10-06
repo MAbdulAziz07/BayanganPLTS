@@ -7,6 +7,8 @@ interface HourlyYieldChartProps {
   currentHour: number;
   tzLabel?: string;
   onSelectHour: (hour: number) => void;
+  /** Versi ringkas untuk ditempel di atas tampilan 3D (layar penuh) */
+  compact?: boolean;
 }
 
 export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
@@ -14,6 +16,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
   currentHour,
   onSelectHour,
   tzLabel = 'WIB',
+  compact = false,
 }) => {
   const { hourly } = dailyResult;
   if (!hourly || hourly.length === 0) return null;
@@ -21,8 +24,8 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
   // Chart dimensions
   const svgWidth = 640;
   const svgHeight = 220;
-  const padLeft = 45;
-  const padRight = 45;
+  const padLeft = 50;
+  const padRight = 55;
   const padTop = 25;
   const padBottom = 35;
 
@@ -56,9 +59,9 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">
-            Kurva Produksi Harian (Hourly Yield Profile)
+            {compact ? 'Kurva Produksi Harian' : 'Kurva Produksi Harian (Hourly Yield Profile)'}
           </h3>
-          <p className="text-[11px] text-slate-500">
+          <p className={`text-[11px] text-slate-500 ${compact ? 'hidden' : ''}`}>
             Klik pada grafik untuk menggeser jam simulasi dan melihat bayangan secara interaktif.
           </p>
         </div>
@@ -84,7 +87,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
       <div className="relative w-full overflow-x-auto">
         <svg
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="w-full h-48 select-none"
+          className={`w-full h-auto select-none ${compact ? '' : 'min-w-[520px]'}`}
         >
           {/* Grid lines */}
           {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
@@ -106,7 +109,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
                   x={padLeft - 6}
                   y={y + 3}
                   textAnchor="end"
-                  className="fill-slate-500 text-[9px] font-mono"
+                  className="fill-slate-500 text-[11px] font-mono"
                 >
                   {poaVal}
                 </text>
@@ -115,7 +118,7 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
                   x={svgWidth - padRight + 6}
                   y={y + 3}
                   textAnchor="start"
-                  className="fill-sky-700 text-[9px] font-mono font-medium"
+                  className="fill-sky-700 text-[11px] font-mono font-medium"
                 >
                   {pwrVal}kW
                 </text>
@@ -208,14 +211,16 @@ export const HourlyYieldChart: React.FC<HourlyYieldChartProps> = ({
                 y2={padTop + chartH + 4}
                 stroke="#cbd5e1"
               />
-              <text
-                x={getX(h)}
-                y={padTop + chartH + 16}
-                textAnchor="middle"
-                className="fill-slate-600 text-[10px] font-mono"
-              >
-                {h}:00
-              </text>
+              {h % 2 === 1 && (
+                <text
+                  x={getX(h)}
+                  y={padTop + chartH + 18}
+                  textAnchor="middle"
+                  className="fill-slate-600 text-[12px] font-mono"
+                >
+                  {String(h).padStart(2, '0')}:00
+                </text>
+              )}
             </g>
           ))}
 
