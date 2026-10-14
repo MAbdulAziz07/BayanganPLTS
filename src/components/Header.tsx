@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sun, Download, RotateCcw } from 'lucide-react';
+import { Sun, Download, RotateCcw, PlayCircle } from 'lucide-react';
 
 type TabId = 'simulasi' | 'analisis_slope' | 'jarak_baris' | 'bypass_diode';
 
@@ -8,6 +8,7 @@ interface HeaderProps {
   setActiveTab: (tab: TabId) => void;
   onOpenReport: () => void;
   onReset: () => void;
+  onStartGuide: () => void;
 }
 
 const TABS: { id: TabId; label: string; short: string }[] = [
@@ -22,6 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   onOpenReport,
   onReset,
+  onStartGuide,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-xs">
@@ -59,6 +61,13 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Actions */}
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={onStartGuide}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors whitespace-nowrap"
+          >
+            <PlayCircle className="w-3.5 h-3.5" />
+            <span>Mulai<span className="hidden sm:inline"> simulasi</span></span>
+          </button>
           <button
             onClick={onReset}
             title="Reset ke Nilai Standar"

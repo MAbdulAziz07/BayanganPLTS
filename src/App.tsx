@@ -31,6 +31,9 @@ import { BypassDiodeExplanation } from './components/BypassDiodeExplanation';
 import { ScenarioPresets } from './components/ScenarioPresets';
 import { ReportModal } from './components/ReportModal';
 import { TimeBar } from './components/TimeBar';
+import { StartSimulationWizard } from './components/StartSimulationWizard';
+
+const ONBOARDED_KEY = 'bayanganplts.panduanSelesai';
 
 export default function App() {
   // Navigation tab
@@ -89,6 +92,37 @@ export default function App() {
 
   // Report Modal
   const [isReportOpen, setIsReportOpen] = useState(false);
+
+  // Alur "Mulai simulasi" untuk pemula — terbuka otomatis pada kunjungan pertama
+  const [isGuideOpen, setIsGuideOpen] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(ONBOARDED_KEY) !== '1';
+    } catch {
+      return true;
+    }
+  });
+  const openGuide = () => {
+    setActiveTab('simulasi');
+    setIsPlaying(false);
+    setIsGuideOpen(true);
+  };
+  const closeGuide = () => {
+    setIsGuideOpen(false);
+    try {
+      window.localStorage.setItem(ONBOARDED_KEY, '1');
+    } catch {
+      /* penyimpanan browser tidak tersedia — abaikan */
+    }
+  };
+
+  // Ringkasan hasil (kartu metrik) — tujuan tombol "Lihat hasil"
+  const metricsRef = useRef<HTMLDivElement>(null);
+  const [highlightResults, setHighlightResults] = useState(false);
+  const showResults = () => {
+    metricsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setHighlightResults(true);
+    window.setTimeout(() => setHighlightResults(false), 1600);
+  };
 
   // Day of year
   const dayOfYear = useMemo(() => getDayOfYear(month, 15), [month]);
@@ -222,6 +256,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         onOpenReport={() => setIsReportOpen(true)}
         onReset={handleReset}
+        onStartGuide={openGuide}
       />
 
       {/* Main Content Area */}
@@ -233,6 +268,12 @@ export default function App() {
             <ScenarioPresets onSelectScenario={handleSelectScenario} />
 
             {/* Metrics HUD Row */}
+            <div
+              ref={metricsRef}
+              className={`scroll-mt-28 rounded-xl transition-shadow duration-500 ${
+                highlightResults ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-100' : ''
+              }`}
+            >
             <MetricsCards
               irradiance={irradiance}
               currentACPowerKW={currentACPowerKW}
@@ -242,6 +283,7 @@ export default function App() {
               arrayConfig={arrayConfig}
               shadedFraction={shadingResult.totalShadedFraction}
             />
+            </div>
 
             {/* 3D Visualizer & Side Controls Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch min-h-[520px]">
@@ -321,6 +363,7 @@ export default function App() {
                   setSky={setSky}
                   panelColorMode={panelColorMode}
                   setPanelColorMode={setPanelColorMode}
+                  onShowResults={showResults}
                 />
               </div>
             </div>
@@ -359,6 +402,22 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Panduan "Mulai simulasi" */}
+      <StartSimulationWizard
+        isOpen={isGuideOpen}
+        onClose={closeGuide}
+        onOpenReport={() => setIsReportOpen(true)}
+        location={location}
+        setLocation={setLocation}
+        month={month}
+        setMonth={setMonth}
+        arrayConfig={arrayConfig}
+        setArrayConfig={setArrayConfig}
+        obstacles={obstacles}
+        setObstacles={setObstacles}
+        dailyResult={dailyResult}
+      />
 
       {/* Technical Report Modal */}
       <ReportModal
