@@ -7,6 +7,7 @@ import {
   SkyConfig,
 } from '../types/solar';
 import { MONTH_NAMES_ID, getRecommendedTilt } from '../utils/solarMath';
+import { Insights, shadingSentence, fmt } from '../utils/insights';
 
 export interface AnnualSummary {
   annualKWh: number;
@@ -27,6 +28,7 @@ interface ReportModalProps {
   dailyResult: DailySimulationResult;
   annualResult: AnnualSummary | null;
   sky: SkyConfig;
+  insights?: Insights;
 }
 
 export const ReportModal: React.FC<ReportModalProps> = ({
@@ -39,6 +41,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   dailyResult,
   annualResult,
   sky,
+  insights,
 }) => {
   if (!isOpen) return null;
 
@@ -209,6 +212,58 @@ export const ReportModal: React.FC<ReportModalProps> = ({
               Angka tahunan = jumlah 12 hari representatif (tanggal 15 tiap bulan) × jumlah hari per bulan. PR = (E<sub>AC</sub> / P<sub>0</sub>) ÷ (H<sub>POA</sub> / 1 kW/m²).
             </p>
           </div>
+
+          {/* Ringkasan & arahan tindakan (hasil simulasi) */}
+          {insights && (
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-white space-y-2">
+              <h4 className="font-semibold text-slate-900">Ringkasan & arahan tindakan</h4>
+              <p className="text-xs text-slate-800 font-medium">{shadingSentence(insights.summary)}</p>
+              {insights.summary.worstWindow && (
+                <p className="text-[11px] text-slate-600">
+                  Kerugian terbesar sekitar pukul {insights.summary.worstWindow}
+                  {insights.summary.mainCause
+                    ? `; penyebab utama ${insights.summary.mainCause.name} (±${fmt(insights.summary.mainCause.lostKWh)} kWh/hari).`
+                    : '.'}
+                </p>
+              )}
+              {insights.actions.length > 0 ? (
+                <table className="w-full text-[11px] border-collapse">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b border-slate-200">
+                      <th className="py-1 pr-2 font-medium">Tindakan</th>
+                      <th className="py-1 px-2 font-medium text-right">Sebelum</th>
+                      <th className="py-1 px-2 font-medium text-right">Sesudah</th>
+                      <th className="py-1 pl-2 font-medium text-right">Selisih</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {insights.actions.map((a) => (
+                      <tr key={a.id} className="border-b border-slate-100 align-top">
+                        <td className="py-1 pr-2 text-slate-800">
+                          {a.title}
+                          <span className="block text-[10px] text-slate-500">
+                            {a.basis === 'tahun' ? 'rata-rata harian setahun' : `hari representatif ${MONTH_NAMES_ID[month - 1]}`}
+                          </span>
+                        </td>
+                        <td className="py-1 px-2 text-right font-mono">{fmt(a.beforeKWh)} kWh</td>
+                        <td className="py-1 px-2 text-right font-mono">{fmt(a.afterKWh)} kWh</td>
+                        <td className="py-1 pl-2 text-right font-mono text-emerald-700">
+                          +{fmt(a.deltaKWh)} kWh (+{fmt(a.deltaPct, 1)}%)
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="text-[11px] text-slate-600">Tidak ada perubahan sederhana yang menaikkan produksi secara berarti.</p>
+              )}
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                Semua angka adalah estimasi berdasarkan asumsi simulasi: hari representatif tanggal 15, cuaca rata-rata iklim
+                (K<sub>T</sub>), suhu tropis tipikal, rugi kotoran/kabel/inverter tetap, dan bentuk rintangan yang
+                disederhanakan. Hasil di lapangan dapat berbeda; verifikasi dengan pengukuran di lokasi.
+              </p>
+            </div>
+          )}
 
           {/* Section 3: Estimasi Finansial */}
           <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200">

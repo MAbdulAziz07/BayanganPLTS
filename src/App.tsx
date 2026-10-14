@@ -32,6 +32,8 @@ import { ScenarioPresets } from './components/ScenarioPresets';
 import { ReportModal } from './components/ReportModal';
 import { TimeBar } from './components/TimeBar';
 import { StartSimulationWizard } from './components/StartSimulationWizard';
+import { ResultsActionPanel, ReferenceSnapshot, useDebounced } from './components/ResultsActionPanel';
+import { computeInsights, ActionItem, SimInputs } from './utils/insights';
 
 const ONBOARDED_KEY = 'bayanganplts.panduanSelesai';
 
@@ -115,11 +117,11 @@ export default function App() {
     }
   };
 
-  // Ringkasan hasil (kartu metrik) — tujuan tombol "Lihat hasil"
-  const metricsRef = useRef<HTMLDivElement>(null);
+  // Panel "Hasil & arahan tindakan" — tujuan tombol "Lihat hasil"
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [highlightResults, setHighlightResults] = useState(false);
   const showResults = () => {
-    metricsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     setHighlightResults(true);
     window.setTimeout(() => setHighlightResults(false), 1600);
   };
@@ -173,6 +175,42 @@ export default function App() {
     [isReportOpen, location, arrayConfig, obstacles, sky]
   );
 
+  // Ringkasan & arahan tindakan — dihitung ulang setelah pengguna berhenti mengubah pengaturan
+  const simInputs = useMemo<SimInputs>(
+    () => ({ location, month, arrayConfig, obstacles, sky }),
+    [location, month, arrayConfig, obstacles, sky]
+  );
+  const debouncedInputs = useDebounced(simInputs);
+  const insights = useMemo(() => {
+    const i = debouncedInputs;
+    const base = simulateFullDay(i.location, i.month, i.arrayConfig, i.obstacles, i.sky);
+    return computeInsights(i, base);
+  }, [debouncedInputs]);
+  const insightsStale = debouncedInputs !== simInputs;
+
+  // Titik acuan untuk perbandingan sebelum / sesudah
+  const [reference, setReference] = useState<ReferenceSnapshot | null>(null);
+  const snapshot = (label: string): ReferenceSnapshot => ({ label, arrayConfig, obstacles });
+  const applyPatch = (patch: Partial<PVArrayConfig>, label: string) => {
+    setReference(snapshot(label));
+    setArrayConfig((prev) => ({ ...prev, ...patch }));
+  };
+  const applyAction = (a: ActionItem) => {
+    setReference(snapshot(`Sebelum: ${a.title.charAt(0).toLowerCase()}${a.title.slice(1)}`));
+    if (a.apply.kind === 'array') {
+      const patch = a.apply.patch;
+      setArrayConfig((prev) => ({ ...prev, ...patch }));
+    } else {
+      const id = a.apply.id;
+      setObstacles((prev) => prev.map((o) => (o.id === id ? { ...o, enabled: false } : o)));
+    }
+  };
+  const restoreReference = () => {
+    if (!reference) return;
+    setArrayConfig(reference.arrayConfig);
+    setObstacles(reference.obstacles);
+  };
+
   // Sun Movement Animation Loop
   const timerRef = useRef<number | null>(null);
   useEffect(() => {
@@ -196,6 +234,7 @@ export default function App() {
 
   // Reset to default baseline
   const handleReset = () => {
+    setReference(null);
     setLocation(CITIES_INDONESIA[0]);
     setMonth(7);
     setHour(9.5);
@@ -239,6 +278,7 @@ export default function App() {
     m: number,
     h: number
   ) => {
+    setReference(null);
     setLocation(loc);
     setArrayConfig(array);
     setObstacles(obs);
@@ -268,12 +308,6 @@ export default function App() {
             <ScenarioPresets onSelectScenario={handleSelectScenario} />
 
             {/* Metrics HUD Row */}
-            <div
-              ref={metricsRef}
-              className={`scroll-mt-28 rounded-xl transition-shadow duration-500 ${
-                highlightResults ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-100' : ''
-              }`}
-            >
             <MetricsCards
               irradiance={irradiance}
               currentACPowerKW={currentACPowerKW}
@@ -283,7 +317,6 @@ export default function App() {
               arrayConfig={arrayConfig}
               shadedFraction={shadingResult.totalShadedFraction}
             />
-            </div>
 
             {/* 3D Visualizer & Side Controls Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch min-h-[520px]">
@@ -367,6 +400,22 @@ export default function App() {
                 />
               </div>
             </div>
+
+            {/* Hasil & arahan tindakan */}
+            <ResultsActionPanel
+              ref={resultsRef}
+              highlight={highlightResults}
+              inputs={simInputs}
+              baseline={dailyResult}
+              insights={insights}
+              insightsStale={insightsStale}
+              reference={reference}
+              onApplyAction={applyAction}
+              onApplyPatch={applyPatch}
+              onSetReference={() => setReference(snapshot('Kondisi yang disimpan'))}
+              onRestoreReference={restoreReference}
+              onClearReference={() => setReference(null)}
+            />
           </div>
         )}
 
@@ -417,6 +466,9 @@ export default function App() {
         obstacles={obstacles}
         setObstacles={setObstacles}
         dailyResult={dailyResult}
+        insights={insights}
+        insightsStale={insightsStale}
+        onApplyAction={applyAction}
       />
 
       {/* Technical Report Modal */}
@@ -430,6 +482,7 @@ export default function App() {
         dailyResult={dailyResult}
         annualResult={annualResult}
         sky={sky}
+        insights={insights}
       />
     </div>
   );

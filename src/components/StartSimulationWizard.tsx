@@ -8,6 +8,8 @@ import {
 } from '../types/solar';
 import { CITIES_INDONESIA, MONTH_NAMES_ID, getRecommendedTilt } from '../utils/solarMath';
 import { TermHelp, compassName } from './TermHelp';
+import { ShadingSummaryCard, ActionList, EstimateNote } from './ResultsActionPanel';
+import { Insights, ActionItem, fmt } from '../utils/insights';
 import {
   chipClass,
   TILT_PRESETS,
@@ -28,7 +30,6 @@ import {
   Trash2,
   Sun,
   Lightbulb,
-  CheckCircle2,
   FileText,
   Box,
 } from 'lucide-react';
@@ -55,6 +56,9 @@ interface StartSimulationWizardProps {
   obstacles: ObstacleConfig[];
   setObstacles: React.Dispatch<React.SetStateAction<ObstacleConfig[]>>;
   dailyResult: DailySimulationResult;
+  insights: Insights;
+  insightsStale: boolean;
+  onApplyAction: (a: ActionItem) => void;
 }
 
 /**
@@ -76,6 +80,9 @@ export const StartSimulationWizard: React.FC<StartSimulationWizardProps> = ({
   obstacles,
   setObstacles,
   dailyResult,
+  insights,
+  insightsStale,
+  onApplyAction,
 }) => {
   const [step, setStep] = useState<WizardStep>(0);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -111,43 +118,6 @@ export const StartSimulationWizard: React.FC<StartSimulationWizardProps> = ({
   const lossLevel = loss < 3 ? 'kecil' : loss <= 10 ? 'sedang' : 'besar';
   const lossColor =
     loss < 3 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : loss <= 10 ? 'text-amber-800 bg-amber-50 border-amber-200' : 'text-rose-700 bg-rose-50 border-rose-200';
-
-  // Saran yang bisa langsung diterapkan
-  const suggestions: { text: string; action?: { label: string; run: () => void } }[] = [];
-  if (arrayConfig.azimuth !== rec.recommendedAzimuth) {
-    suggestions.push({
-      text: `Panel menghadap ${compassName(arrayConfig.azimuth)}. Untuk lokasi ini, menghadap ${
-        rec.recommendedAzimuth === 0 ? 'Utara' : 'Selatan'
-      } biasanya menghasilkan energi tahunan lebih besar.`,
-      action: {
-        label: `Hadapkan ke ${rec.recommendedAzimuth === 0 ? 'Utara' : 'Selatan'}`,
-        run: () => setArrayConfig((p) => ({ ...p, azimuth: rec.recommendedAzimuth })),
-      },
-    });
-  }
-  if (arrayConfig.tilt < 10) {
-    suggestions.push({
-      text: 'Panel terlalu landai, sehingga air hujan dan debu mudah mengendap.',
-      action: {
-        label: `Ubah kemiringan ke ${rec.practicalRecommended}°`,
-        run: () => setArrayConfig((p) => ({ ...p, tilt: rec.practicalRecommended })),
-      },
-    });
-  }
-  if (loss > 3 && arrayConfig.inverterType === 'string') {
-    suggestions.push({
-      text: 'Bayangan menurunkan seluruh rangkaian panel. Optimizer per panel dapat mengurangi kerugian ini.',
-      action: {
-        label: 'Coba pakai optimizer',
-        run: () => setArrayConfig((p) => ({ ...p, inverterType: 'optimizer' })),
-      },
-    });
-  }
-  if (loss > 10) {
-    suggestions.push({
-      text: 'Kerugian bayangan cukup besar. Coba geser panel lebih jauh dari rintangan, pasang lebih tinggi, atau pangkas pohon.',
-    });
-  }
 
   const StepIcon = STEPS[step].icon;
 
@@ -484,15 +454,15 @@ export const StartSimulationWizard: React.FC<StartSimulationWizardProps> = ({
                     <Sun className="w-3.5 h-3.5 text-amber-500" /> Listrik per hari
                   </span>
                   <span className="block text-xl font-bold font-mono text-slate-900 mt-0.5">
-                    {dailyResult.totalEnergyKWh.toFixed(1)} <span className="text-xs font-medium text-slate-500">kWh</span>
+                    {fmt(dailyResult.totalEnergyKWh, 1)} <span className="text-xs font-medium text-slate-500">kWh</span>
                   </span>
                   <span className="text-[10px] text-slate-500">rata-rata bulan {MONTH_NAMES_ID[month - 1]}</span>
                 </div>
                 <div className={`p-3 rounded-xl border ${lossColor}`}>
                   <span className="text-[11px] flex items-center gap-1">Hilang karena bayangan</span>
-                  <span className="block text-xl font-bold font-mono mt-0.5">{loss.toFixed(1)}%</span>
+                  <span className="block text-xl font-bold font-mono mt-0.5">{fmt(loss, 1)}%</span>
                   <span className="text-[10px]">
-                    {dailyResult.energyLostKWh.toFixed(2)} kWh/hari · tergolong {lossLevel}
+                    {fmt(dailyResult.energyLostKWh)} kWh/hari · tergolong {lossLevel}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl border border-slate-200 bg-white">
@@ -511,12 +481,13 @@ export const StartSimulationWizard: React.FC<StartSimulationWizardProps> = ({
 
               <p className="text-[12px] leading-relaxed text-slate-700">
                 Dengan {totalPanels} panel menghadap {compassName(arrayConfig.azimuth)} dan miring {arrayConfig.tilt}°
-                di {location.name}, PLTS ini menghasilkan sekitar <b>{dailyResult.totalEnergyKWh.toFixed(1)} kWh per hari</b>{' '}
-                pada bulan {MONTH_NAMES_ID[month - 1]}.{' '}
-                {activeObstacles.length === 0
-                  ? 'Tidak ada rintangan aktif, jadi tidak ada energi yang hilang karena bayangan.'
-                  : `Bayangan dari ${activeObstacles.length} rintangan mengurangi produksi sebesar ${loss.toFixed(1)}%.`}
+                di {location.name}, PLTS ini menghasilkan sekitar <b>{fmt(dailyResult.totalEnergyKWh, 1)} kWh per hari</b>{' '}
+                pada bulan {MONTH_NAMES_ID[month - 1]}.
               </p>
+
+              <div className={`transition-opacity ${insightsStale ? 'opacity-60' : ''}`} aria-busy={insightsStale}>
+                <ShadingSummaryCard insights={insights} month={month} compact />
+              </div>
 
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 <TermHelp k="shadingLoss" label="Apa itu rugi bayangan?" />
@@ -524,31 +495,26 @@ export const StartSimulationWizard: React.FC<StartSimulationWizardProps> = ({
                 <TermHelp k="pr" label="Apa itu PR?" />
               </div>
 
-              {suggestions.length > 0 ? (
-                <div className="space-y-2">
-                  <span className="font-semibold flex items-center gap-1.5">
-                    <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> Saran perbaikan
-                  </span>
-                  {suggestions.map((s, i) => (
-                    <div key={i} className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
-                      {s.text}
-                      {s.action && (
-                        <button
-                          onClick={s.action.run}
-                          className="mt-1.5 block px-2 py-1 rounded bg-white border border-amber-300 text-amber-800 font-semibold hover:bg-amber-100"
-                        >
-                          {s.action.label}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  Konfigurasi sudah baik untuk lokasi ini.
-                </p>
-              )}
+              <div className={`space-y-2 transition-opacity ${insightsStale ? 'opacity-60' : ''}`}>
+                <span className="font-semibold flex items-center gap-1.5">
+                  <Lightbulb className="w-3.5 h-3.5 text-amber-500" /> Arahan tindakan
+                </span>
+                <ActionList
+                  actions={insights.actions}
+                  onApply={onApplyAction}
+                  limit={3}
+                  lossPct={insights.summary.lossPct}
+                />
+                {insights.actions.length > 0 && (
+                  <p className="text-[10px] text-slate-500">
+                    Setelah menekan tombol, kondisi sebelumnya disimpan sebagai acuan. Perbandingan sebelum/sesudah dan
+                    pembanding kemiringan, jarak baris, serta inverter ada di bagian <b>Hasil & arahan tindakan</b> di bawah
+                    tampilan 3D.
+                  </p>
+                )}
+              </div>
+
+              <EstimateNote compact />
 
               <p className="text-[11px] text-slate-500">
                 Tutup panduan untuk melihat bayangan bergerak di tampilan 3D. Semua pilihan tadi bisa diubah lagi di panel
