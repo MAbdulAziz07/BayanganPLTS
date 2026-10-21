@@ -48,7 +48,8 @@ function getLeafTexture(): THREE.CanvasTexture {
   const baseX = size / 2;
   const baseY = size - 6;
 
-  const palette = ['#2d5a22', '#356a27', '#3f7a2e', '#2a4f1f', '#4b8a34', '#5b9a3c'];
+  // Mangga menumbuhkan pucuk baru berwarna tembaga/merah sebelum menghijau.
+  const palette = ['#24491f', '#2d5a22', '#356a27', '#3f7a2e', '#2a4f1f', '#4b8a34', '#5b9a3c', '#8c4930', '#a85b3a'];
   const count = 9;
   for (let i = 0; i < count; i++) {
     const spread = (i / (count - 1) - 0.5) * 2.5; // radian, kipas ±72°
@@ -67,8 +68,12 @@ function getLeafTexture(): THREE.CanvasTexture {
     ctx.stroke();
     // Helai lanset (meruncing di ujung)
     const grad = ctx.createLinearGradient(-w, -len, w, 0);
-    const c1 = palette[Math.floor(rnd() * palette.length)];
-    const c2 = palette[Math.floor(rnd() * palette.length)];
+    const isNewFlush = rnd() < 0.14;
+    const greenPalette = palette.slice(0, 7);
+    const newGrowthPalette = palette.slice(7);
+    const leafPalette = isNewFlush ? newGrowthPalette : greenPalette;
+    const c1 = leafPalette[Math.floor(rnd() * leafPalette.length)];
+    const c2 = leafPalette[Math.floor(rnd() * leafPalette.length)];
     grad.addColorStop(0, c1);
     grad.addColorStop(1, c2);
     ctx.fillStyle = grad;
@@ -78,7 +83,7 @@ function getLeafTexture(): THREE.CanvasTexture {
     ctx.bezierCurveTo(-w * 0.8, -len * 0.75, -w, -len * 0.3, 0, -12);
     ctx.fill();
     // Kilap tepi atas
-    ctx.fillStyle = 'rgba(190,225,140,0.16)';
+    ctx.fillStyle = isNewFlush ? 'rgba(255,190,125,0.2)' : 'rgba(190,225,140,0.16)';
     ctx.beginPath();
     ctx.moveTo(0, -12);
     ctx.bezierCurveTo(w * 0.9, -len * 0.3, w * 0.7, -len * 0.75, 0, -len);
